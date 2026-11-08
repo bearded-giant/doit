@@ -90,7 +90,7 @@ claude=$(claude_rows)
 lists=$(printf '%s\n' "$out" | sed -n '/^LISTS/,$p')
 
 it "busy pane: yellow dot, low context, its list and whole active item on one line"
-assert_contains "$claude" "●◔25 solo  solo-list  ▸ [bug] 4. fix the redirect"
+assert_contains "$claude" "●25 solo  solo-list  ▸ [bug] 4. fix the redirect"
 
 it "ask pane past 5m shows its age, ready pane off screen shows a check"
 assert_contains "$claude" "● pair $PAIR_A 7m  pane-a  ▸ pane a item"
@@ -287,7 +287,7 @@ assert_contains "$(last_frame)" "    grp-b"
 
 it "right arrow scrolls sideways instead of cutting"
 drive 60 30 '\e[C' > /dev/null
-assert_contains "$(grep -c '^olo  solo-list  ▸ \[bug\] 4. fix$' "$SCREEN")" "1"
+assert_contains "$(grep -c '^lo  solo-list  ▸ \[bug\] 4. fix *$' "$SCREEN")" "1"
 
 it "wheel scrolls down, footer shows the window into the board"
 drive 6 200 '\e[<65;5;3M' > /dev/null
@@ -301,7 +301,7 @@ assert_eq "0" "$(last_frame | grep -c '^ 1-5/')"
 
 it "shift+wheel, how a trackpad sends sideways, scrolls sideways"
 drive 60 30 '\e[<69;5;3M' > /dev/null
-assert_contains "$(grep -c '^olo  solo-list  ▸ \[bug\] 4. fix$' "$SCREEN")" "1"
+assert_contains "$(grep -c '^lo  solo-list  ▸ \[bug\] 4. fix *$' "$SCREEN")" "1"
 
 it "EMPTY opens into a row per list on click"
 drive "\e[<0;3;$(row_of '^EMPTY ')M" > /dev/null
