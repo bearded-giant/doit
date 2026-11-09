@@ -1,4 +1,6 @@
+import { waitUntil } from "@vercel/functions";
 import { getPool } from "../../lib/db.js";
+import { settle } from "../../lib/feed.js";
 import { logError } from "../../lib/http.js";
 import { PRIVATE, env, json, runCommand, uuidv5, verifySlack } from "../../lib/slack.js";
 
@@ -9,7 +11,9 @@ export async function POST(request) {
     const form = Object.fromEntries(new URLSearchParams(raw));
     if (form.user_id !== env().owner) return json({ response_type: "ephemeral", text: PRIVATE });
     try {
-        const out = await runCommand(await getPool(), form.text || "", { opId: uuidv5(`command:${form.trigger_id}`), tz: env().tz });
+        const pool = await getPool();
+        const out = await runCommand(pool, form.text || "", { opId: uuidv5(`command:${form.trigger_id}`), tz: env().tz });
+        waitUntil(settle(pool));
         return json({ response_type: "ephemeral", ...out });
     } catch (err) {
         logError("slack/commands", err);

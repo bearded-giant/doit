@@ -9,6 +9,7 @@ import changes from "./api/sync/changes.js";
 import importDocs from "./api/sync/import.js";
 import health from "./api/health.js";
 import prune from "./api/cron/prune.js";
+import digest from "./api/cron/digest.js";
 import * as slackCommands from "./api/slack/commands.js";
 import * as slackEvents from "./api/slack/events.js";
 import * as slackInteractions from "./api/slack/interactions.js";
@@ -20,6 +21,7 @@ const ROUTES = {
     "/api/sync/import": importDocs,
     "/api/health": health,
     "/api/cron/prune": prune,
+    "/api/cron/digest": digest,
     "/api/slack/commands": slackCommands,
     "/api/slack/events": slackEvents,
     "/api/slack/interactions": slackInteractions,

@@ -1,4 +1,6 @@
+import { waitUntil } from "@vercel/functions";
 import { getPool } from "../lib/db.js";
+import { settle } from "../lib/feed.js";
 import { body, logError, methodIs, requireMachine } from "../lib/http.js";
 import { applyOps } from "../lib/runner.js";
 
@@ -14,7 +16,9 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: "ops: [{op_id, ts, tz, source, tool, args}]" });
         }
         if (ops.length > MAX_BATCH) return res.status(413).json({ error: `at most ${MAX_BATCH} ops per batch` });
-        const results = await applyOps(await getPool(), ops, { host: machine });
+        const pool = await getPool();
+        const results = await applyOps(pool, ops, { host: machine });
+        if (results.some(r => r.status === "applied" && r.change_seq)) waitUntil(settle(pool));
         res.status(200).json({ results });
     } catch (err) {
         logError("ops", err);

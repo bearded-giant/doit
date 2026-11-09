@@ -64,7 +64,8 @@ const fakeSlack = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     calls.push({ path: req.url, body: JSON.parse(raw || "{}") });
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ ok: true }));
+    const extra = req.url === "/chat.postMessage" ? { channel: "CFEED", ts: `${Date.now() / 1000}` } : req.url === "/chat.getPermalink" ? { permalink: "https://slack.example/p1" } : {};
+    res.end(JSON.stringify({ ok: true, ...extra }));
 });
 await new Promise(r => fakeSlack.listen(0, r));
 const slackBase = `http://127.0.0.1:${fakeSlack.address().port}`;
@@ -75,6 +76,14 @@ const waitFor = async (pred, ms = 3000) => {
         await new Promise(r => setTimeout(r, 20));
     }
     return false;
+};
+// background work (settle after an interaction) may still be calling Slack; let it finish before the next step clears the log
+const quiet = async () => {
+    let len;
+    do {
+        len = calls.length;
+        await new Promise(r => setTimeout(r, 200));
+    } while (calls.length !== len);
 };
 
 Object.assign(process.env, { DATABASE_URL: URL_, SLACK_SIGNING_SECRET: SECRET, SLACK_OWNER_ID: "UOWNER", SLACK_BOT_TOKEN: "xoxb-test", SLACK_API_URL: slackBase, DOIT_TZ: "UTC" });
@@ -199,6 +208,185 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     assert.equal(banks.length, 1, "retried event applied once");
     assert.equal(banks[0].priorities, "important");
     assert.equal(banks[0].source, "slack");
+}
+
+// Home tab: owner's items before Claude's, in progress first; list switch; overflow and modals
+const { applyOps } = await import("./lib/runner.js");
+const { mintToken } = await import("./lib/auth.js");
+let n = 0;
+const mcpOp = (tool, args, host = "devbox", source = "mcp") => applyOps(pool, [{ op_id: uuidv5(`test:${++n}`), ts: Date.now(), tz: "UTC", source, tool, args }], { host });
+const interact = payload => post("/api/slack/interactions", form({ payload: JSON.stringify({ user: { id: "UOWNER" }, trigger_id: `TR${++n}`, ...payload }) }));
+const sections = view => view.blocks.filter(b => b.type === "section").map(b => b.text.text);
+{
+    process.env.SLACK_FEED_CHANNEL = "CFEED";
+    calls.length = 0;
+    await mcpOp("add_todo", { list: "daily", text: "claude task", type: "chore" });
+    await mcpOp("add_todo", { list: "daily", text: "walk the dog" }, "laptop", "user");
+    await mcpOp("add_todo", { list: "daily", text: "water plants" }, "laptop", "user");
+    await mcpOp("start_todo", { list: "daily", id: (await one("select doc from lists where name = 'daily'")).doc.todos.find(t => t.text === "walk the dog").id }, "laptop", "user");
+    calls.length = 0;
+    const home = JSON.stringify({ type: "event_callback", event_id: "EvHome", event: { type: "app_home_opened", user: "UOWNER" } });
+    await post("/api/slack/events", home, sign(home));
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.publish")));
+    const view = calls.find(c => c.path === "/views.publish").body.view;
+    assert.equal(view.type, "home");
+    assert.equal(calls.find(c => c.path === "/views.publish").body.user_id, "UOWNER");
+    const texts = sections(view);
+    assert.match(texts[0], /▶ .*walk the dog/, "in progress first");
+    assert.ok(texts.findIndex(t => /call the bank/.test(t)) < texts.findIndex(t => /claude task/.test(t)), "mine before claude");
+    assert.ok(texts.findIndex(t => /water plants/.test(t)) > texts.findIndex(t => /call the bank/.test(t)) && texts.some(t => /water plants/.test(t)), "priority before none");
+    assert.ok(view.blocks.length <= 100);
+    assert.equal(view.blocks[0].elements[0].initial_option.value, "daily");
+
+    calls.length = 0;
+    await interact({ type: "block_actions", actions: [{ action_id: "home:list", selected_option: { value: "auth" }, action_ts: `${++n}.1` }] });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.publish")));
+    assert.match(calls.find(c => c.path === "/views.publish").body.view.blocks[1].elements[0].text, /· auth$/);
+    assert.equal((await one("select value from settings where key = 'home_list'")).value, "auth");
+
+    await quiet();
+    calls.length = 0;
+    await mcpOp("add_todo", { list: "auth", text: "renew cert", priority: "urgent" }, "laptop", "user");
+    const authItem = (await one("select doc from lists where name = 'auth'")).doc.todos[0];
+    await interact({ type: "block_actions", actions: [{ action_id: "home:item", selected_option: { value: JSON.stringify({ a: "start", list: "auth", id: authItem.id }) }, action_ts: `${++n}.2` }] });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.publish")));
+    assert.equal((await one("select doc from lists where name = 'auth'")).doc.todos[0].in_progress, true);
+    assert.match(sections(calls.find(c => c.path === "/views.publish").body.view)[0], /^▶ /);
+
+    await quiet();
+    calls.length = 0;
+    await interact({ type: "block_actions", actions: [{ action_id: "home:item", selected_option: { value: JSON.stringify({ a: "edit", list: "auth", id: authItem.id }) }, action_ts: `${++n}.3` }] });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.open")));
+    const modal = calls.find(c => c.path === "/views.open").body.view;
+    assert.equal(modal.callback_id, "item_modal");
+    assert.deepEqual(JSON.parse(modal.private_metadata), { mode: "edit", list: "auth", id: authItem.id });
+    assert.equal(modal.blocks[0].element.initial_value, "renew cert");
+    const saved = await interact({
+        type: "view_submission",
+        view: { id: "V1", hash: "h1", callback_id: "item_modal", private_metadata: modal.private_metadata, state: { values: {
+            title: { v: { value: "renew the cert" } }, list: { v: { selected_option: { value: "auth" } } }, priority: { v: { selected_option: { value: "critical" } } },
+            due: { v: { selected_date: "2026-12-24" } }, notes: { v: { value: "ask ops" } },
+        } } },
+    });
+    assert.deepEqual(saved.json, { response_action: "clear" });
+    const edited = (await one("select doc from lists where name = 'auth'")).doc.todos[0];
+    assert.equal(edited.text, "renew the cert");
+    assert.equal(edited.priorities, "critical");
+    assert.equal(edited.due_date, "2026-12-24");
+    assert.match(edited.description, /ask ops/);
+    const bad = await interact({ type: "view_submission", view: { id: "V2", hash: "h2", callback_id: "item_modal", private_metadata: JSON.stringify({ mode: "add", list: "auth" }), state: { values: { title: { v: { value: "  " } } } } } });
+    assert.equal(bad.json.response_action, "errors");
+
+    await quiet();
+    calls.length = 0;
+    await interact({ type: "block_actions", actions: [{ action_id: "home:item", selected_option: { value: JSON.stringify({ a: "delete", list: "auth", id: authItem.id }) }, action_ts: `${++n}.4` }] });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.open")));
+    const del = calls.find(c => c.path === "/views.open").body.view;
+    assert.equal(del.callback_id, "delete_modal");
+    assert.equal((await one("select doc from lists where name = 'auth'")).doc.todos.length, 1, "nothing deleted until the modal is submitted");
+    assert.deepEqual((await interact({ type: "view_submission", view: { id: "V3", hash: "h3", callback_id: "delete_modal", private_metadata: del.private_metadata } })).json, { response_action: "clear" });
+    assert.equal((await one("select doc from lists where name = 'auth'")).doc.todos.length, 0);
+}
+
+// Save to doit: the shortcut opens the item modal prefilled; submitting adds to daily
+{
+    await quiet();
+    calls.length = 0;
+    await interact({ type: "message_action", callback_id: "save_to_doit", channel: { id: "C1" }, message: { ts: "1.5", text: "please rotate the key\nby friday" } });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.open")));
+    assert.equal(calls.find(c => c.path === "/chat.getPermalink").body.message_ts, "1.5");
+    const modal = calls.find(c => c.path === "/views.open").body.view;
+    assert.equal(modal.blocks[0].element.initial_value, "please rotate the key");
+    assert.match(modal.blocks[4].element.initial_value, /by friday\n\nhttps:\/\/slack\.example\/p1$/);
+    const r = await interact({ type: "view_submission", view: { id: "V4", hash: "h4", callback_id: "item_modal", private_metadata: modal.private_metadata, state: { values: { title: { v: { value: "rotate the key" } }, list: { v: { selected_option: { value: "daily" } } }, priority: { v: { selected_option: { value: "none" } } }, notes: { v: { value: "please rotate the key\nby friday" } } } } } });
+    assert.deepEqual(r.json, { response_action: "clear" });
+    const added = (await one("select doc from lists where name = 'daily'")).doc.todos.find(t => t.text === "rotate the key");
+    assert.equal(added.source, "slack");
+    assert.match(added.description, /by friday/);
+}
+
+// Feed: Claude's changes post per host and list, extend within a minute, claude: items collapse;
+// an owed twin gets its own message with buttons and is edited when a user completes it
+{
+    const c = await pool.connect();
+    const token = await mintToken(c, "devbox");
+    c.release();
+    const ops = ops => fetch(`${base}/api/ops`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ ops }) }).then(r => r.json());
+    const op = (tool, args, source = "mcp") => ({ op_id: uuidv5(`feed:${++n}`), ts: Date.now(), tz: "UTC", source, tool, args });
+    await quiet();
+    calls.length = 0;
+    await ops([op("add_todo", { list: "auth", text: "from claude", type: "chore" })]);
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.postMessage")));
+    const first = calls.find(c => c.path === "/chat.postMessage").body;
+    assert.equal(first.channel, "CFEED");
+    assert.match(first.text, /^\*devbox\* · auth\n\+ \[chore\] \d+\. from claude$/);
+    calls.length = 0;
+    await ops([op("add_todo", { list: "auth", text: "claude: follow up", type: "chore" })]);
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.update")));
+    assert.equal(calls.filter(c => c.path === "/chat.postMessage").length, 0, "same host and list within a minute edits the message");
+    assert.match(calls.find(c => c.path === "/chat.update").body.text, /from claude\n1 claude: item$/);
+
+    calls.length = 0;
+    const owe = await ops([op("add_todo", { list: "auth", text: "rotate vault creds", type: "gate", owe: true })]);
+    assert.equal(owe.results[0].status, "applied");
+    assert.ok(await waitFor(() => calls.filter(c => c.path === "/chat.postMessage").length >= 1));
+    const owed = calls.find(c => c.path === "/chat.postMessage" && /owed/.test(c.body.text)).body;
+    assert.match(owed.text, /^\*owed\* · daily\n.*auth: rotate vault creds/);
+    assert.deepEqual(owed.blocks[1].elements.map(e => e.action_id), ["feed:done", "feed:start", "feed:notes"]);
+    const twinId = JSON.parse(owed.blocks[1].elements[0].value).id;
+    assert.equal((await one("select doc from lists where name = 'daily'")).doc.todos.some(t => t.id === twinId), true);
+
+    calls.length = 0;
+    await ops([op("complete_todo", { list: "daily", id: twinId }, "user")]);
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.update" && /done/.test(c.body.text))));
+    assert.equal(calls.filter(c => c.path === "/chat.postMessage").length, 0, "a user's change posts nothing new");
+    const updated = calls.find(c => c.path === "/chat.update" && /done/.test(c.body.text)).body;
+    assert.deepEqual(updated.blocks, []);
+
+    calls.length = 0;
+    await ops([op("add_todo", { list: "auth", text: "typed by me", type: "chore" }, "user")]);
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(calls.filter(c => c.path === "/chat.postMessage").length, 0);
+    assert.ok(Number((await one("select value from settings where key = 'feed_cursor'")).value) > 0);
+}
+
+// Feed buttons: Done completes the twin and the message is edited; Notes answers ephemerally
+{
+    const c = await pool.connect();
+    const token = await mintToken(c, "laptop");
+    c.release();
+    calls.length = 0;
+    const r = await fetch(`${base}/api/ops`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ ops: [{ op_id: uuidv5(`feed:${++n}`), ts: Date.now(), tz: "UTC", source: "mcp", tool: "add_todo", args: { list: "auth", text: "approve the app", type: "gate", owe: true, description: "why: needs admin\n\ndo: click approve" } }] }) }).then(r => r.json());
+    assert.equal(r.results[0].status, "applied");
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.postMessage" && /owed/.test(c.body.text))));
+    const msg = calls.find(c => c.path === "/chat.postMessage" && /owed/.test(c.body.text)).body;
+    assert.doesNotMatch(msg.text, /needs admin/, "notes stay out of the feed");
+    const value = msg.blocks[1].elements[0].value;
+    calls.length = 0;
+    await interact({ type: "block_actions", channel: { id: "CFEED" }, actions: [{ action_id: "feed:notes", value, action_ts: `${++n}.5` }] });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.postEphemeral")));
+    assert.match(calls.find(c => c.path === "/chat.postEphemeral").body.text, /needs admin/);
+    calls.length = 0;
+    await interact({ type: "block_actions", channel: { id: "CFEED" }, actions: [{ action_id: "feed:done", value, action_ts: `${++n}.6` }] });
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.update" && /done/.test(c.body.text))));
+    const { id } = JSON.parse(value);
+    assert.equal((await one("select doc from lists where name = 'daily'")).doc.todos.find(t => t.id === id).done, true);
+    assert.equal((await one("select doc from lists where name = 'auth'")).doc.todos.find(t => /approve the app/.test(t.text)).done, true, "the project twin followed");
+}
+
+// Digest DMs the owner's pending daily items
+{
+    process.env.CRON_SECRET = "s3cret";
+    calls.length = 0;
+    const res = await fetch(`${base}/api/cron/digest`, { headers: { authorization: "Bearer s3cret" } });
+    const body = await res.json();
+    assert.equal(body.sent, true);
+    const dm = calls.find(c => c.path === "/chat.postMessage").body;
+    assert.equal(dm.channel, "UOWNER");
+    assert.match(dm.text, /^\*daily\*: \d+ pending\n/);
+    assert.match(dm.text, /call the bank/);
+    assert.doesNotMatch(dm.text, /rotate vault creds/, "done items stay out");
+    assert.equal((await fetch(`${base}/api/cron/digest`)).status, 401);
 }
 
 server.close();

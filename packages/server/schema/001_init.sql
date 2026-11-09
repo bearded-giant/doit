@@ -41,7 +41,8 @@ create table if not exists feed_messages (
   key text primary key,
   channel text not null,
   ts text not null,
-  updated_at timestamptz
+  body jsonb not null default '{}',
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists settings (
