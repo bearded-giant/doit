@@ -1,4 +1,4 @@
-name: Run Docker Tests
+name: Run Tests
 
 on:
   push:
@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  nvim:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Run Docker Tests
         run: |
@@ -22,3 +22,21 @@ jobs:
             echo "::error::Tests failed with exit code $exit_code"
             exit $exit_code
           fi
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  tmux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y tmux jq fzf
+      - run: tests/tmux/run-tests.sh
