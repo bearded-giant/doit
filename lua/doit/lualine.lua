@@ -55,7 +55,7 @@ local function get_todo_module()
         if ok and core.get_module then
             todo_module = core.get_module("todos")
         end
-        
+
         -- If not loaded through core, try to load it directly
         if not todo_module then
             local ok2, doit = pcall(require, "doit")
@@ -63,7 +63,7 @@ local function get_todo_module()
                 todo_module = doit.load_module("todos", {})
             end
         end
-        
+
         -- Last resort: try to load the module directly
         if not todo_module then
             local ok3, todos = pcall(require, "doit.modules.todos")
@@ -117,7 +117,7 @@ local function get_active_todo()
     if not loaded_state or not loaded_state.todos then
         return nil
     end
-    
+
     for _, todo in ipairs(loaded_state.todos) do
         if todo.in_progress and not todo.done then
             return todo
@@ -128,11 +128,11 @@ end
 
 function M.active_todo()
     local loaded_state = ensure_state_loaded()
-    
+
     if not loaded_state or not loaded_state.todos or #loaded_state.todos == 0 then
         return ""
     end
-    
+
     -- Find active todo
     local active = nil
     for _, todo in ipairs(loaded_state.todos) do
@@ -141,16 +141,16 @@ function M.active_todo()
             break
         end
     end
-    
+
     if not active then
         return ""
     end
-    
+
     -- Get config
     local ok, config = pcall(require, "doit.config")
     local icon = "◐"
     local max_length = 30
-    
+
     if ok and config.options then
         if config.options.formatting and config.options.formatting.in_progress then
             icon = config.options.formatting.in_progress.icon or "◐"
@@ -159,13 +159,13 @@ function M.active_todo()
             max_length = config.options.lualine.max_length
         end
     end
-    
+
     -- Format the text - truncate if needed
     local text = active.text:gsub("\n", " ")
     if #text > max_length then
         text = text:sub(1, max_length) .. "..."
     end
-    
+
     return icon .. " " .. text
 end
 
@@ -199,11 +199,11 @@ function M.todo_stats()
     if not loaded_state or not loaded_state.todos then
         return ""
     end
-    
+
     local done = 0
     local in_progress = 0
     local pending = 0
-    
+
     for _, todo in ipairs(loaded_state.todos) do
         if todo.done then
             done = done + 1
@@ -213,10 +213,15 @@ function M.todo_stats()
             pending = pending + 1
         end
     end
-    
+
     -- Show in order: in-progress, pending, done
     -- Using clearer text labels instead of just icons
     return string.format("▶ %d | ○ %d | ✓ %d", in_progress, pending, done)
+end
+
+-- "[offline queued 2]" while doitd syncs with a server and something is pending; empty otherwise
+function M.sync_badge()
+    return require("doit.client").sync_badge()
 end
 
 function M.setup()
@@ -226,6 +231,7 @@ function M.setup()
         active_todo = M.active_todo,
         current_list = M.current_list,
         todo_stats = M.todo_stats,
+        sync_badge = M.sync_badge,
     }
 end
 
