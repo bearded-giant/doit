@@ -38,6 +38,14 @@ mklist() {
 
 # the pty ends lines in \r\n; each redraw starts at \e[H, marked so the last frame can be cut out
 strip() { perl -pe 's/\e\[H/\n\@\@FRAME\n/g; s/\e\[[0-9;?]*[a-zA-Z]//g; s/\e\][^\a]*\a//g; s/\r//g'; }
+# util-linux script takes the command behind -c, BSD script after the typescript file
+PTY="$TEST_TMPDIR/pty"
+if script -V 2>/dev/null | grep -q util-linux; then
+    printf '#!/bin/bash\nexec script -qc "$1" /dev/null\n' > "$PTY"
+else
+    printf '#!/bin/bash\nexec script -q /dev/null "$1"\n' > "$PTY"
+fi
+chmod +x "$PTY"
 # run through the shebang: /bin/bash on macOS is 3.2, which is what wezterm and tmux run
 board_raw() { env -u TMUX_PANE TMUX="$TM" "$SCRIPTS/todo-board.sh" --once; }
 board() { board_raw | strip; }
@@ -220,7 +228,7 @@ drive() {
         done
         printf q
     ) | env -u TMUX_PANE -u WEZTERM_PANE TMUX="$TM" PATH="$FAKE_BIN:$PATH" COLUMNS="$cols" LINES="$lines" \
-        DOIT_BOARD_INTERVAL=1 perl -e 'alarm 30; exec @ARGV' script -q /dev/null "$SCRIPTS/todo-board.sh" 2> /dev/null |
+        DOIT_BOARD_INTERVAL=1 perl -e 'alarm 30; exec @ARGV' "$PTY" "$SCRIPTS/todo-board.sh" 2> /dev/null |
         tee "$SCREEN.raw" | strip > "$SCREEN"
     cat "$SWITCHED"
 }
