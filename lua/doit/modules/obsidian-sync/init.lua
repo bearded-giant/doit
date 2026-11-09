@@ -308,6 +308,9 @@ function M.setup_functions()
 						date = file:match("(%d%d%d%d%-%d%d%-%d%d)") or os.date("%Y-%m-%d"),
 						lnum = lnum,
 					}
+					if todos_module.state.update_todo then
+						todos_module.state.update_todo(new_todo.id, { fields = { obsidian_ref = new_todo.obsidian_ref } })
+					end
 
 					-- Track reference
 					M.refs[new_todo.id] = {
@@ -600,8 +603,8 @@ function M.setup_functions()
 		todo.obsidian_ref = { file = daily_path, date = today, lnum = insert_at }
 		local core = require("doit.core")
 		local todos_module = core.get_module("todos")
-		if todos_module and todos_module.state and todos_module.state.save_todos then
-			todos_module.state.save_todos()
+		if todos_module and todos_module.state and todos_module.state.update_todo then
+			todos_module.state.update_todo(todo.id, { fields = { obsidian_ref = todo.obsidian_ref } })
 		end
 
 		local short_text = #todo.text > 40 and todo.text:sub(1, 40) .. "..." or todo.text
@@ -609,7 +612,7 @@ function M.setup_functions()
 		return true
 	end
 
-	-- update a single todo's done state directly in the json file on disk
+	-- flip a todo's done state through doitd, whichever list holds it
 	function M.update_todo_in_json(lists_dir, todo_id, is_done)
 		local json_files = vim.fn.glob(lists_dir .. "/*.json", false, true)
 
@@ -624,23 +627,9 @@ function M.setup_functions()
 					for _, todo in ipairs(data.todos) do
 						if todo.id == todo_id then
 							if todo.done ~= is_done then
-								todo.done = is_done
-								if is_done then
-									todo.in_progress = false
-									todo.completed_at = os.time()
-								else
-									todo.completed_at = nil
-								end
-								data._metadata = data._metadata or {}
-								data._metadata.updated_at = os.time()
-
-								local wf = io.open(json_path, "w")
-								if wf then
-									wf:write(vim.fn.json_encode(data))
-									wf:close()
-									require("doit.modules.todos.state.twin").sync(todo, is_done and "complete" or "revert", todo.completed_at)
-									return true
-								end
+								local ok = require("doit.client").call(is_done and "complete_todo" or "revert_todo",
+									{ id = todo_id }, { lists_dir = lists_dir })
+								return ok and true or false
 							end
 							return false
 						end

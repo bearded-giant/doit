@@ -106,31 +106,23 @@ function M.setup(state, parent_module)
         local is_global = state.notes.current_mode == "global"
         local file_path = M.get_storage_path(is_global)
 
-        local ok, f = pcall(io.open, file_path, "w")
-        if ok and f then
-            local status, json = pcall(vim.fn.json_encode, notes_list)
-            if status then
-                f:write(json)
-                f:close()
-
-                if is_global then
-                    state.notes.global = notes_list
-                else
-                    local project_id = M.get_project_identifier()
-                    if project_id then
-                        state.notes.project[project_id] = notes_list
-                    end
-                end
-                return true
-            else
-                f:close()
-                vim.notify("error encoding notes data", vim.log.levels.ERROR)
-                return false
-            end
-        else
-            vim.notify("failed to save notes to file", vim.log.levels.ERROR)
+        -- notes/<scope>.json is doitd's to write; the scope is the file's base name
+        local scope = vim.fn.fnamemodify(file_path, ":t:r")
+        local lists_dir = vim.fn.fnamemodify(file_path, ":h:h") .. "/lists"
+        local ok, err = require("doit.client").call("put_scope_notes", { scope = scope, notes = notes_list }, { lists_dir = lists_dir })
+        if not ok then
+            vim.notify("failed to save notes: " .. tostring(err), vim.log.levels.ERROR)
             return false
         end
+        if is_global then
+            state.notes.global = notes_list
+        else
+            local project_id = M.get_project_identifier()
+            if project_id then
+                state.notes.project[project_id] = notes_list
+            end
+        end
+        return true
     end
 
     -- save a single note (update in-place or append)
