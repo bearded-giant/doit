@@ -5,6 +5,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 
 # status line passes #{window_id} as $1 — #() has no client context; by hand,
 # '<session>:<window>' names a window too
@@ -28,7 +29,7 @@ idle_chip() {
     [[ -n "$idle" ]] && tmux set -gq @doit-todo-fg "$idle"
     [[ -n "$text_bg" ]] && tmux set -gq @doit-todo-text-bg "$text_bg"
     tmux set -gq @doit-todo-icon "$ICON_TASK"
-    echo "${LIST_LABEL}: no active"
+    echo "${LIST_LABEL}: no active$(sync_badge)"
     exit 0
 }
 
@@ -71,4 +72,4 @@ if [[ ${#todo_text} -gt $CHAR_LIMIT ]]; then
     todo_text="${todo_text:0:$CHAR_LIMIT}..."
 fi
 
-printf '%s: %s\n' "$LIST_LABEL" "$todo_text"
+printf '%s: %s%s\n' "$LIST_LABEL" "$todo_text" "$(sync_badge)"
