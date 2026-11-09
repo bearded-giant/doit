@@ -1,0 +1,15 @@
+{
+  "name": "@doit/daemon",
+  "version": "2.0.13",
+  "description": "doitd: single writer of the doit replica on one machine",
+  "type": "module",
+  "bin": {
+    "doitd": "doitd.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@doit/core": "*"
+  }
+}

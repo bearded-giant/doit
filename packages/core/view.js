@@ -75,6 +75,24 @@ export function localView(dataDir) {
     };
 }
 
+// rename, delete and merge change what windows and session.json point at; the process in the
+// user's tmux runs this once the data change is applied (in-process handlers run it themselves)
+export function applyViewEffect(view, tool, args) {
+    const relink = (from, to) => {
+        view.updateSession(session => {
+            for (const [key, list] of Object.entries(session.sessions || {})) {
+                if (list !== from) continue;
+                if (to) session.sessions[key] = to;
+                else delete session.sessions[key];
+            }
+        });
+        view.retagLiveWindows(from, to);
+    };
+    if (tool === "rename_list") relink(args.old_name, args.new_name);
+    else if (tool === "delete_list") relink(args.name, null);
+    else if (tool === "merge_list") relink(args.from, args.to);
+}
+
 export const noView = {
     getTmuxWindow: () => null,
     setWindowLink() {},

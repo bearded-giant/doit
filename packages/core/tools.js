@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { composeTodoText, nextRank, normalizeTodoText, parseTags, parseTodoText, relabelTwin, renumberText } from "./todo-text.js";
 import { isSequenced, setSequence } from "./sequence.js";
+import { applyViewEffect } from "./view.js";
 
 // the tmux chip shows list names whole, so length is capped here instead of cut there
 const MAX_LIST_NAME = 24;
@@ -1459,12 +1460,7 @@ export const TOOLS = [
                     return "relinked";
                 });
             }
-            ctx.view.updateSession(session => {
-                for (const [sess, list] of Object.entries(session.sessions || {})) {
-                    if (list === from) session.sessions[sess] = to;
-                }
-            });
-            ctx.view.retagLiveWindows(from, to);
+            applyViewEffect(ctx.view, "merge_list", { from, to });
 
             const pending = moved.filter(t => !t.done).length;
             const span = rankMap.size ? `; ranks #${[...rankMap.values()][0]}-#${next - 1}` : "";
@@ -1609,12 +1605,7 @@ export const TOOLS = [
                 });
             }
 
-            ctx.view.updateSession(session => {
-                for (const [sess, list] of Object.entries(session.sessions || {})) {
-                    if (list === old_name) session.sessions[sess] = new_name;
-                }
-            });
-            ctx.view.retagLiveWindows(old_name, new_name);
+            applyViewEffect(ctx.view, "rename_list", { old_name, new_name });
 
             return text(`Renamed list "${old_name}" to "${new_name}"`);
         },
@@ -1634,12 +1625,7 @@ export const TOOLS = [
             const twinNotes = (data.todos || []).map(t => detachTwin(ctx, t, name)).join("");
             const archived = ctx.store.archiveList(name, ctx.clock.now());
 
-            ctx.view.updateSession(session => {
-                for (const [sess, list] of Object.entries(session.sessions || {})) {
-                    if (list === name) delete session.sessions[sess];
-                }
-            });
-            ctx.view.retagLiveWindows(name, null);
+            applyViewEffect(ctx.view, "delete_list", { name });
 
             return text(`Deleted list "${name}" (had ${count} items), archived to ${archived}${twinNotes}`);
         },
