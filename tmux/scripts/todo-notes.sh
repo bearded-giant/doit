@@ -5,6 +5,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 
 unset DOIT_ACTIVE_LIST
 TODO_LIST_PATH="$(get_active_list_path)"
@@ -23,24 +24,11 @@ USE_EDITOR=$(tmux show-option -gqv "@doit-use-editor")
 
 export TODO_LIST_PATH
 
-new_note_id() { echo "$(date +%s)_$RANDOM"; }
-
 clip() {
     if command -v pbcopy &>/dev/null; then pbcopy
     elif command -v xclip &>/dev/null; then xclip -selection clipboard
     elif command -v xsel &>/dev/null; then xsel --clipboard
     else return 1
-    fi
-}
-
-# atomic jq read-modify-write of the list file
-write_list() {
-    local tmp="${TODO_LIST_PATH}.tmp"
-    if jq "$@" "$TODO_LIST_PATH" > "$tmp"; then
-        mv "$tmp" "$TODO_LIST_PATH"
-    else
-        rm -f "$tmp"
-        return 1
     fi
 }
 
@@ -102,12 +90,8 @@ create_note() {
     title=$(input_line "" "New note title (enter to save, esc to cancel)")
     [[ $? -eq 130 ]] && return 130
     body=$(edit_body "")
-    write_list --arg id "$(new_note_id)" --arg t "$title" --arg b "$body" --arg tid "$LINK_TODO_ID" '
-        .notes = ((.notes // []) + [{
-            id: $id, title: $t, body: $b,
-            created_at: (now | floor), updated_at: (now | floor)
-        } + (if $tid == "" then {} else {todo_ids: [$tid]} end)]) |
-        ._metadata.updated_at = (now | floor)'
+    doit_call create_note "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg t "$title" --arg b "$body" --arg tid "$LINK_TODO_ID" \
+        '{list: $list, title: $t, body: $b} + (if $tid == "" then {} else {todo_ids: [$tid]} end)')" "$ACTIVE_LIST_NAME" >/dev/null
 }
 
 NEW_ONLY=""
@@ -174,13 +158,10 @@ while true; do
             ;;
         "l")
             [[ -n "$LINK_TODO_ID" && -n "$NID" ]] || continue
-            write_list --arg id "$NID" --arg tid "$LINK_TODO_ID" '
-                .notes |= map(if .id == $id then
-                    ((.todo_ids // []) | if any(. == $tid) then map(select(. != $tid)) else . + [$tid] end) as $ids |
-                    (if ($ids | length) == 0 then del(.todo_ids) else .todo_ids = $ids end) |
-                    .updated_at = (now | floor)
-                else . end) |
-                ._metadata.updated_at = (now | floor)'
+            IDS=$(jq -c --arg id "$NID" --arg tid "$LINK_TODO_ID" '(.notes // [])[] | select(.id == $id) | (.todo_ids // [])
+                | if any(. == $tid) then map(select(. != $tid)) else . + [$tid] end' "$TODO_LIST_PATH")
+            doit_call update_note "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg id "$NID" --argjson ids "${IDS:-[]}" \
+                '{list: $list, id: $id, todo_ids: $ids}')" "$ACTIVE_LIST_NAME" >/dev/null
             ;;
         "e"|"enter")
             [[ -z "$NID" ]] && continue
@@ -189,9 +170,8 @@ while true; do
             NEW_T=$(input_line "$CUR_T" "Edit title (enter to save, esc to cancel)")
             [[ $? -eq 130 ]] && continue
             NEW_B=$(edit_body "$CUR_B")
-            write_list --arg id "$NID" --arg t "$NEW_T" --arg b "$NEW_B" '
-                .notes |= map(if .id == $id then .title = $t | .body = $b | .updated_at = (now | floor) else . end) |
-                ._metadata.updated_at = (now | floor)'
+            doit_call update_note "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg id "$NID" --arg t "$NEW_T" --arg b "$NEW_B" \
+                '{list: $list, id: $id, title: $t, body: $b}')" "$ACTIVE_LIST_NAME" >/dev/null
             ;;
         "y")
             [[ -z "$NID" ]] && continue
@@ -209,9 +189,7 @@ while true; do
             CONFIRM=$(input_line "" "Delete note '$LBL'? type y then enter (esc to cancel)")
             [[ $? -eq 130 ]] && continue
             if [[ "$CONFIRM" == "y" ]]; then
-                write_list --arg id "$NID" '
-                    .notes |= map(select(.id != $id)) |
-                    ._metadata.updated_at = (now | floor)'
+                doit_call delete_note "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg id "$NID" '{list: $list, id: $id}')" "$ACTIVE_LIST_NAME" >/dev/null
             fi
             ;;
     esac

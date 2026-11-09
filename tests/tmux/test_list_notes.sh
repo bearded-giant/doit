@@ -175,6 +175,7 @@ run_notes() {
 }
 mkdir -p "$TEST_TMPDIR/ndata/lists"
 NLIST="$TEST_TMPDIR/ndata/lists/links.json"
+start_doitd "$TEST_TMPDIR/ndata"
 
 describe "todo-notes.sh --todo"
 
