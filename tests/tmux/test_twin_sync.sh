@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # owed items live twice (project list + daily twin); a tmux-side change to one
-# side must reach the other the same way mcp/server.js syncTwin does.
+# side must reach the other the same way packages/core/server.js syncTwin does.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_harness.sh"

@@ -13,11 +13,11 @@ import {
 import {
     LISTS_DIR, PRIORITY_LABELS, findListByTodoId, isMineList, loadList, parseDue, readJSON, readVersion,
     renderDue, server, setItemSource, stripFooter, structureAware,
-} from "./server.js";
-import { isSequenced } from "./sequence.js";
-import { parseTodoText } from "./todo-text.js";
+} from "@doit/core/server.js";
+import { isSequenced } from "@doit/core/sequence.js";
+import { parseTodoText } from "@doit/core/todo-text.js";
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const PRIORITIES = ["critical", "urgent", "important"];
 const PRIORITY_RANK = { critical: 0, urgent: 1, important: 2 };

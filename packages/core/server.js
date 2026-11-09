@@ -15,7 +15,7 @@ import { isSequenced, setSequence } from "./sequence.js";
 // bump does not have to be repeated here.
 function readVersion() {
     try {
-        const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+        const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
         return fs.readFileSync(path.join(root, "VERSION"), "utf-8").trim() || "0.0.0";
     } catch {
         return "0.0.0";

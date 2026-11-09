@@ -29,7 +29,7 @@ twin_apply() {
         revert)   filter='(.todos[] | select(.id == $id)) |= (.done = false | .in_progress = false | del(.completed_at))' ;;
         priority) filter='(.todos[] | select(.id == $id)) |= (if $arg == "" then del(.priorities) else .priorities = $arg end)' ;;
         due)      filter='(.todos[] | select(.id == $id)) |= (if $arg == "" then del(.due_date) else .due_date = $arg end)' ;;
-        # mirrors mcp/todo-text.js relabelTwin: the owed copy names its project list after the marker/type/rank prefix
+        # mirrors packages/core/todo-text.js relabelTwin: the owed copy names its project list after the marker/type/rank prefix
         relink)   filter='(.todos[] | select(.id == $id)) |= ((.twin.list // "") as $old
                       | if $old != "" and $old != $arg then
                           ((.text // "") | capture("^(?<p>(claude:\\s*)?(\\[[^\\]]+\\]\\s*)?(\\d+[a-z]*\\.\\s+)?)").p) as $p
@@ -39,7 +39,7 @@ twin_apply() {
                               | if ((.description // "") | startswith($f)) then .description = "from: " + $arg + " #" + .description[($f | length):] else . end)
                         else . end
                       | .twin.list = $arg)' ;;
-        # mirrors mcp/server.js detachTwin: notes never sync between twins, so the deleted side's notes move over
+        # mirrors packages/core/server.js detachTwin: notes never sync between twins, so the deleted side's notes move over
         detach)   filter='def strip: sub("\n*----------\nlast (updated|modified):[\\s\\S]*\\z"; "");
                       def trimws: sub("\\A\\s+"; "") | sub("\\s+\\z"; "");
                       ($notes | strip | trimws | if startswith($hdr) then .[($hdr | length):] | trimws else . end) as $n

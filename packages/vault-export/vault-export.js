@@ -7,8 +7,8 @@ import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { isSequenced } from "./sequence.js";
-import { normalizeTodoText, parseDeps, parseTags, parseTodoText } from "./todo-text.js";
+import { isSequenced } from "@doit/core/sequence.js";
+import { normalizeTodoText, parseDeps, parseTags, parseTodoText } from "@doit/core/todo-text.js";
 
 const DATA_DIR = process.env.DOIT_DATA_DIR || path.join(process.env.HOME, ".local/share/nvim/doit");
 const LISTS_DIR = path.join(DATA_DIR, "lists");

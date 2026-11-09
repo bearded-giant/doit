@@ -1,8 +1,8 @@
--- Lua port of normalizeTodoText in mcp/todo-text.js. The two MUST agree: a todo
+-- Lua port of normalizeTodoText in packages/core/todo-text.js. The two MUST agree: a todo
 -- typed in nvim and the same todo created through MCP (which wraps it in a
 -- claude:/[type]/rank/deps shell) have to compare equal for dedupe to work.
 -- Shared fixtures live in tests/modules/todos/normalize_spec.lua and
--- mcp/todo-text.test.mjs.
+-- packages/core/todo-text.test.mjs.
 local M = {}
 
 function M.normalize(text)

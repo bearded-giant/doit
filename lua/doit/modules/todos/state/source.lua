@@ -1,4 +1,4 @@
--- must match tmux/scripts/lib-source.sh and mcp/server.js: all three surfaces share the store
+-- must match tmux/scripts/lib-source.sh and packages/core/server.js: all three surfaces share the store
 local session = require("doit.modules.todos.state.session")
 local PERMANENT_LIST = require("doit.modules.todos.state.storage").PERMANENT_LIST
 

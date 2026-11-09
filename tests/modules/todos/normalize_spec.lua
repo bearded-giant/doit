@@ -1,6 +1,6 @@
 local normalize = require("doit.modules.todos.state.normalize")
 
--- These fixtures are mirrored in mcp/todo-text.test.mjs. Any change here must
+-- These fixtures are mirrored in packages/core/todo-text.test.mjs. Any change here must
 -- land there in the same commit, or nvim and MCP silently disagree about what
 -- counts as a duplicate.
 local FIXTURES = {

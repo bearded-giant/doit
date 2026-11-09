@@ -103,14 +103,14 @@ assert.ok(fs.existsSync(path.join(listsDir, "proj2.json")));
 ok(["list", "rm", "proj2", "--yes"]);
 assert.ok(!fs.existsSync(path.join(listsDir, "proj2.json")));
 
-assert.equal(ok(["--version"]).trim(), fs.readFileSync(path.join(here, "..", "VERSION"), "utf-8").trim());
+assert.equal(ok(["--version"]).trim(), fs.readFileSync(path.join(here, "..", "..", "VERSION"), "utf-8").trim());
 r = run(["bogus"]);
 assert.equal(r.status, 1);
 assert.match(r.stderr, /Unknown command "bogus"/);
 
 // importing server.js must not have changed what the MCP side writes
 const mcp = spawnSync("node", ["-e", `
-    const { server } = await import(${JSON.stringify(path.join(here, "server.js"))});
+    const { server } = await import(${JSON.stringify(path.join(here, "..", "core", "server.js"))});
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const [c, s] = InMemoryTransport.createLinkedPair();

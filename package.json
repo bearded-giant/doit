@@ -1,0 +1,12 @@
+{
+  "name": "doit",
+  "version": "2.0.13",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces"
+  }
+}

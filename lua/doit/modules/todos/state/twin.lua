@@ -1,5 +1,5 @@
 -- Owed items live twice (a project list and daily), cross-linked by `twin`.
--- Mirrors mcp/server.js syncTwin so an nvim edit to one copy reaches the other.
+-- Mirrors packages/core/server.js syncTwin so an nvim edit to one copy reaches the other.
 local footer = require("doit.core.utils.footer")
 
 local M = {}
@@ -45,7 +45,7 @@ local function write_list(path, data)
     return true
 end
 
--- mirrors mcp/todo-text.js relabelTwin: the owed copy names its project list after the marker/type/rank prefix
+-- mirrors packages/core/todo-text.js relabelTwin: the owed copy names its project list after the marker/type/rank prefix
 local function relabel(twin, old_list, new_list)
     if not old_list or old_list == new_list then
         return
@@ -69,7 +69,7 @@ local function relabel(twin, old_list, new_list)
     end
 end
 
--- mirrors mcp/server.js detachTwin: notes never sync between twins, so the deleted side's notes move over
+-- mirrors packages/core/server.js detachTwin: notes never sync between twins, so the deleted side's notes move over
 local function detach(twin, deleted_list, source)
     local header = source.twin.list .. ": " .. source.twin.id
     local notes = vim.trim(footer.strip(source.description))

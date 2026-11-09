@@ -1,0 +1,14 @@
+{
+  "name": "@doit/core",
+  "version": "2.0.13",
+  "description": "doit tool handlers and MCP server",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^4.0.0"
+  }
+}
