@@ -53,8 +53,6 @@ ${vars}
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>ProcessType</key>
-    <string>Background</string>
     <key>StandardOutPath</key>
     <string>${xml(log)}</string>
     <key>StandardErrorPath</key>

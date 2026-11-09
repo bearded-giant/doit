@@ -2,7 +2,10 @@ import http from "http";
 import { localTz } from "@doit/core/ctx.js";
 import { acquireLock, applyOp, dataDir, lockHolder, paths, readState, stateDir } from "@doit/daemon/local.js";
 
-export function socketRequest(socketPath, method, pathname, body, timeoutMs = 2000) {
+// a warm daemon answers in milliseconds; the first call after a start can take over a second
+export const CALL_TIMEOUT_MS = Number(process.env.DOIT_CALL_TIMEOUT_MS) || 5000;
+
+export function socketRequest(socketPath, method, pathname, body, timeoutMs = CALL_TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
         const req = http.request({ socketPath, method, path: pathname, headers: { "content-type": "application/json" }, timeout: timeoutMs }, res => {
             let data = "";
@@ -23,8 +26,8 @@ export function socketRequest(socketPath, method, pathname, body, timeoutMs = 20
 }
 
 // doitd answers: its result. Socket dead and the lock free: apply here under the lock, same code,
-// same outbox. Lock held by a live daemon that does not answer: an error, never a second writer.
-export async function doitCall({ tool, args = {}, source = "user", active_list, active_list_note, tz = localTz() }, { state = stateDir(), timeoutMs = 2000 } = {}) {
+// same outbox. Lock held by a live daemon that does not answer within the timeout: an error, never a second writer.
+export async function doitCall({ tool, args = {}, source = "user", active_list, active_list_note, tz = localTz() }, { state = stateDir(), timeoutMs = CALL_TIMEOUT_MS } = {}) {
     const p = paths(state);
     const body = { tool, args, source, active_list, active_list_note, tz };
     // a daemon serves one replica; a process pointed at another data dir must not write through it
