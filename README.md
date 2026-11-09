@@ -1,6 +1,6 @@
 # Do-It.nvim
 
-[![Tests](https://github.com/bearded-giant/do-it.nvim/actions/workflows/run-tests.yml/badge.svg)](https://github.com/bearded-giant/do-it.nvim/actions/workflows/run-tests.yml)
+[![Tests](https://github.com/bearded-giant/doit/actions/workflows/run-tests.yml/badge.svg)](https://github.com/bearded-giant/doit/actions/workflows/run-tests.yml)
 
 Do-It.nvim is a modular task management framework for Neovim, providing a clean, distraction-free interface to manage your tasks and notes directly within your editor.
 
@@ -30,7 +30,7 @@ Do-It.nvim began as a way to track tasks and keep simple markdown notes per proj
 
 ```lua
 return {
-    "bearded-giant/do-it.nvim",
+    "bearded-giant/doit",
     config = function()
         require("doit").setup()
     end,
@@ -55,7 +55,7 @@ return {
 
 ```lua
 return {
-    "bearded-giant/do-it.nvim",
+    "bearded-giant/doit",
     config = function()
         require("doit").setup({
             modules = {
@@ -74,7 +74,7 @@ Use individual modules without the framework:
 ```lua
 -- Just todos
 return {
-    "bearded-giant/do-it.nvim",
+    "bearded-giant/doit",
     config = function()
         require("doit_todos").setup()
     end,
@@ -82,7 +82,7 @@ return {
 
 -- Just notes
 return {
-    "bearded-giant/do-it.nvim",
+    "bearded-giant/doit",
     config = function()
         require("doit_notes").setup()
     end,
@@ -90,7 +90,7 @@ return {
 
 -- Calendar (v2.0) - macOS only, requires icalbuddy
 return {
-    "bearded-giant/do-it.nvim",
+    "bearded-giant/doit",
     config = function()
         require("doit").setup({
             modules = {
@@ -324,7 +324,7 @@ The tmux add-on provides todo management directly from tmux, with status bar int
 Add to your `tmux.conf`:
 
 ```bash
-set -g @plugin 'bearded-giant/do-it.nvim'
+set -g @plugin 'bearded-giant/doit'
 ```
 
 Then install with `prefix + I`.
