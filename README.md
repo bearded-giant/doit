@@ -518,7 +518,7 @@ Do-it.nvim includes an MCP server that exposes your todo lists to [Claude Code](
 ### Setup
 
 ```bash
-cd mcp && npm install
+npm install
 ```
 
 Add to your Claude Code `settings.json` under `mcpServers`:
@@ -527,7 +527,7 @@ Add to your Claude Code `settings.json` under `mcpServers`:
 {
   "doit": {
     "command": "node",
-    "args": ["/path/to/do-it.nvim/mcp/server.js"]
+    "args": ["/path/to/do-it.nvim/packages/cli/doit-mcp.js"]
   }
 }
 ```
@@ -538,7 +538,7 @@ If you configured a custom storage path in your do-it.nvim setup (via `modules.t
 {
   "doit": {
     "command": "node",
-    "args": ["/path/to/do-it.nvim/mcp/server.js"],
+    "args": ["/path/to/do-it.nvim/packages/cli/doit-mcp.js"],
     "env": {
       "DOIT_DATA_DIR": "/your/custom/data/path"
     }
@@ -644,11 +644,11 @@ The MCP server reads and writes the same JSON files used by the Neovim plugin an
 
 ## Command Line
 
-`mcp/cli.js` is a `doit` command for working your lists from any shell. Run it with no arguments and it walks you through it: pick a list, pick an item, pick what to do with it. Arrow keys and Enter drive every prompt, typing filters whatever is on screen, and Esc backs out a level. It writes through the same handlers as the MCP server, so owed twins, timestamps, and validation behave the same. Items you add are yours (`source: "user"`, no rank prefix), same as typing them in Neovim or tmux.
+`packages/cli/cli.js` is a `doit` command for working your lists from any shell. Run it with no arguments and it walks you through it: pick a list, pick an item, pick what to do with it. Arrow keys and Enter drive every prompt, typing filters whatever is on screen, and Esc backs out a level. It writes through the same handlers as the MCP server, so owed twins, timestamps, and validation behave the same. Items you add are yours (`source: "user"`, no rank prefix), same as typing them in Neovim or tmux.
 
 ```bash
-cd mcp && npm install
-ln -s "$PWD/cli.js" ~/.local/bin/doit    # or anywhere else on your PATH
+npm install
+ln -s "$PWD/packages/cli/cli.js" ~/.local/bin/doit    # or anywhere else on your PATH
 ```
 
 | Command | What it does |
@@ -678,12 +678,12 @@ Nothing prompts when stdin or stdout isn't a terminal, so scripts are safe: a mi
 
 ## Obsidian Vault Export
 
-Want your lists in Obsidian, next to the rest of your notes? `mcp/vault-export.js` mirrors every list into a vault folder: one folder per list, one note per item, so you can browse items and read their notes without a popup covering your panes. It's one-way. Edit todos through Neovim, tmux, or MCP, and the vault copy follows. Anything you change in an exported note gets overwritten on the next export.
+Want your lists in Obsidian, next to the rest of your notes? `packages/vault-export/vault-export.js` mirrors every list into a vault folder: one folder per list, one note per item, so you can browse items and read their notes without a popup covering your panes. It's one-way. Edit todos through Neovim, tmux, or MCP, and the vault copy follows. Anything you change in an exported note gets overwritten on the next export.
 
 ```bash
-node mcp/vault-export.js <vault>/doit-todos            # export once
-node mcp/vault-export.js <vault>/doit-todos --watch    # export, then re-export whenever a list changes
-node mcp/vault-export.js <vault>/doit-todos --install  # macOS: run --watch as a launchd agent
+node packages/vault-export/vault-export.js <vault>/doit-todos            # export once
+node packages/vault-export/vault-export.js <vault>/doit-todos --watch    # export, then re-export whenever a list changes
+node packages/vault-export/vault-export.js <vault>/doit-todos --install  # macOS: run --watch as a launchd agent
 ```
 
 `--install` writes `~/Library/LaunchAgents/com.doit.vault-export.plist` and loads it, so the export stays current across reboots. It pins the `node` binary you ran it with, so run it again after switching Node versions. Errors go to `vault-export.log` in the data directory. To remove it, run `launchctl bootout gui/$(id -u)/com.doit.vault-export` and delete the plist.
@@ -710,6 +710,15 @@ See the [developer documentation](./docs/) for:
 - [Framework architecture](./docs/development/framework.md)
 - [Module development guide](./docs/modules/)
 - [Implementation notes](./docs/implementation/)
+
+Tests run per surface: the Node packages under `packages/` use Node's built-in runner, the Neovim plugin runs in Docker, and the tmux add-on has a bash suite.
+
+| Surface | Command |
+|---------|---------|
+| Node packages | `npm install && npm test` (one package: `npm test -w packages/core`) |
+| Neovim plugin | `docker/run-tests.sh` |
+| tmux add-on | `tests/tmux/run-tests.sh` |
+| Help docs | `make check-docs` |
 
 ## Roadmap
 
