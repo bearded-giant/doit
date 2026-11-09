@@ -4,14 +4,14 @@ local M = {}
 -- Setup function for commands
 function M.setup(module)
     local commands = {}
-    
+
     -- Main DoIt command
     commands.DoIt = {
         callback = function(opts)
             local state = module.state
             local config = module.config
             local main_window = module.ui.main_window
-            
+
             local args = vim.split(opts.args, "%s+", { trimempty = true })
             if #args == 0 then
                 -- No args => toggle the main todo window
@@ -148,9 +148,7 @@ function M.setup(module)
                 if field == "priorities" then
                     -- If user typed "nil", it means clear priorities
                     if value == "nil" then
-                        state.todos[index].priorities = nil
-                        state.save_todos()
-                        require("doit.modules.todos.state.twin").sync(state.todos[index], "priority", nil)
+                        state.set_priority(state.todos[index].id, nil)
                         vim.notify("Cleared priorities for todo " .. index, vim.log.levels.INFO)
                     else
                         local priority_list = vim.split(value, ",", { trimempty = true })
@@ -179,9 +177,7 @@ function M.setup(module)
                         end
 
                         if #valid_priorities > 0 then
-                            state.todos[index].priorities = valid_priorities
-                            state.save_todos()
-                            require("doit.modules.todos.state.twin").sync(state.todos[index], "priority", valid_priorities)
+                            state.set_priority(state.todos[index].id, valid_priorities[1])
                             vim.notify("Updated priorities for todo " .. index, vim.log.levels.INFO)
                         end
                     end
@@ -190,8 +186,7 @@ function M.setup(module)
                     local todo_actions = module.ui.todo_actions
                     local hours, err = todo_actions.parse_time_estimation(value)
                     if hours then
-                        state.todos[index].estimated_hours = hours
-                        state.save_todos()
+                        state.update_todo(state.todos[index].id, { fields = { estimated_hours = hours } })
                         vim.notify("Updated estimated completion time for todo " .. index, vim.log.levels.INFO)
                     else
                         vim.notify("Error: " .. (err or "Invalid time format"), vim.log.levels.ERROR)
@@ -204,7 +199,7 @@ function M.setup(module)
                 main_window.toggle_todo_window()
             end
         end,
-        
+
         opts = {
             desc = "Toggle Todo List window or add new todo",
             nargs = "*",
@@ -234,7 +229,7 @@ function M.setup(module)
             end
         }
     }
-    
+
     -- Move todo to another list
     commands.DoItTodoMove = {
         callback = function(opts)
@@ -292,7 +287,7 @@ function M.setup(module)
             desc = "Toggle Active Todos List window",
         }
     }
-    
+
     -- Todo List Manager command
     commands.DoItLists = {
         callback = function(opts)
@@ -301,10 +296,10 @@ function M.setup(module)
                 module.ui.list_manager_window.toggle_window()
                 return
             end
-            
+
             local command = opts.fargs[1]
             table.remove(opts.fargs, 1)
-            
+
             if command == "switch" or command == "use" then
                 -- Switch to the specified list
                 local list_name = opts.fargs[1]
@@ -312,10 +307,10 @@ function M.setup(module)
                     vim.notify("Usage: DoItLists switch <list_name>", vim.log.levels.ERROR)
                     return
                 end
-                
+
                 local success, msg = module.state.switch_list(list_name)
                 vim.notify(msg, success and vim.log.levels.INFO or vim.log.levels.ERROR)
-                
+
                 -- Refresh main window if open
                 if module.ui.main_window and module.ui.main_window.render_todos then
                     module.ui.main_window.render_todos()
@@ -327,7 +322,7 @@ function M.setup(module)
                     vim.notify("Usage: DoItLists create <list_name>", vim.log.levels.ERROR)
                     return
                 end
-                
+
                 local now = os.time()
                 local success, msg = module.state.create_list(list_name, {}, {
                     created_at = now,
@@ -342,10 +337,10 @@ function M.setup(module)
                     vim.notify("Usage: DoItLists delete <list_name>", vim.log.levels.ERROR)
                     return
                 end
-                
+
                 local success, msg = module.state.delete_list(list_name)
                 vim.notify(msg, success and vim.log.levels.INFO or vim.log.levels.ERROR)
-                
+
                 -- Refresh main window if open
                 if module.ui.main_window and module.ui.main_window.render_todos then
                     module.ui.main_window.render_todos()
@@ -358,10 +353,10 @@ function M.setup(module)
                     vim.notify("Usage: DoItLists rename <old_name> <new_name>", vim.log.levels.ERROR)
                     return
                 end
-                
+
                 local success, msg = module.state.rename_list(old_name, new_name)
                 vim.notify(msg, success and vim.log.levels.INFO or vim.log.levels.ERROR)
-                
+
                 -- Refresh main window if open
                 if module.ui.main_window and module.ui.main_window.render_todos then
                     module.ui.main_window.render_todos()
@@ -370,12 +365,12 @@ function M.setup(module)
                 -- List available lists
                 local lists = module.state.get_available_lists()
                 local active_list = module.state.todo_lists.active
-                
+
                 if #lists == 0 then
                     vim.notify("No todo lists found", vim.log.levels.INFO)
                     return
                 end
-                
+
                 -- Print each list name with active indicator
                 for _, list in ipairs(lists) do
                     local active_marker = list.name == active_list and "* " or "  "
@@ -414,7 +409,7 @@ Commands:
             nargs = "*",
             complete = function(arglead, cmdline, cursorpos)
                 local args = vim.split(cmdline, "%s+", { trimempty = true })
-                
+
                 if #args <= 2 then
                     -- Complete subcommands
                     return { "switch", "use", "create", "new", "delete", "remove", "rename", "list", "ls" }
@@ -427,12 +422,12 @@ Commands:
                     end
                     return list_names
                 end
-                
+
                 return {}
             end
         }
     }
-    
+
     commands.DoItDue = {
         callback = function()
             local due_dates = require("doit.modules.todos.state.due_dates")

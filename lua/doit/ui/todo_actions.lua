@@ -15,7 +15,7 @@ local function get_todo_module()
     if not todo_module then
         local core = require("doit.core")
         todo_module = core.get_module("todos")
-        
+
         -- If not loaded, try to load it
         if not todo_module then
             local doit = require("doit")
@@ -451,7 +451,7 @@ function M.toggle_todo(win_id, on_render)
 		else
 			local rows = require("doit.ui.main_window").build_render_rows()
 			for i, row in ipairs(rows) do
-				if row.todo == todo_ref and row.is_first then
+				if row.todo and row.todo.id == todo_ref.id and row.is_first then
 					if vim.api.nvim_win_is_valid(win_id) then
 						vim.api.nvim_win_set_cursor(win_id, { i, 0 })
 					end
@@ -658,14 +658,15 @@ function M.edit_todo(win_id, on_render)
 
 	local todo_index = get_real_todo_index(bullet_line, state.active_filter)
 	if todo_index then
+		-- the id, not the index: the list can reload while the prompt is open
+		local todo_id = state.todos[todo_index].id
 		multiline_input.create({
 			prompt = "Edit to-do",
 			default = state.todos[todo_index].text,
 			on_submit = function(input)
 				vim.cmd("echo ''")
 				if input and input ~= "" then
-					state.todos[todo_index].text = input
-					state.save_to_disk()
+					state.update_todo(todo_id, { text = input })
 					maybe_render(on_render)
 				end
 			end,
@@ -726,10 +727,7 @@ function M.edit_priorities(win_id, on_render)
 					priorities,
 					selected_priority,
 					function(selected_priority_name)
-						-- Update the priority
-						state.todos[todo_index].priorities = selected_priority_name
-						state.save_to_disk()
-						require("doit.modules.todos.state.twin").sync(todo_ref, "priority", selected_priority_name)
+						state.set_priority(todo_ref.id, selected_priority_name)
 
 						-- Render the updated list
 						maybe_render(on_render)
@@ -737,7 +735,7 @@ function M.edit_priorities(win_id, on_render)
 						-- Find the new position of the todo after sorting
 						local new_position
 						for i, todo in ipairs(state.todos) do
-							if todo == todo_ref then
+							if todo.id == todo_ref.id then
 								new_position = i
 								break
 							end
@@ -795,6 +793,7 @@ function M.add_time_estimation(win_id, on_render)
 	if not todo_index then
 		return
 	end
+	local todo_id = state.todos[todo_index].id
 
 	vim.ui.input({
 		prompt = "Estimated completion time (e.g., 15m, 2h, 1d, 0.5w): ",
@@ -805,8 +804,7 @@ function M.add_time_estimation(win_id, on_render)
 		if input and input ~= "" then
 			local hours, err = M.parse_time_estimation(input)
 			if hours then
-				state.todos[todo_index].estimated_hours = hours
-				state.save_to_disk()
+				state.update_todo(todo_id, { fields = { estimated_hours = hours } })
 				vim.notify("Time estimation added successfully", vim.log.levels.INFO)
 			else
 				vim.notify("Error adding time estimation: " .. (err or "Unknown error"), vim.log.levels.ERROR)
@@ -843,9 +841,7 @@ function M.set_sequence(win_id, on_render)
 			vim.notify("Sequence must be a positive whole number", vim.log.levels.WARN)
 			return
 		end
-		sorting.set_sequence(state.todos, todo, pos)
-		state.sort_todos()
-		state.save_to_disk()
+		state.update_todo(todo.id, { sequence = pos or 0 })
 		maybe_render(on_render)
 	end)
 end
@@ -867,8 +863,7 @@ function M.remove_time_estimation(win_id, on_render)
 	local todo_index = get_real_todo_index(bullet_line, state.active_filter)
 
 	if todo_index and state.todos[todo_index] then
-		state.todos[todo_index].estimated_hours = nil
-		state.save_to_disk()
+		state.update_todo(state.todos[todo_index].id, { fields = { estimated_hours = vim.NIL } })
 		vim.notify("Time estimation removed successfully", vim.log.levels.INFO)
 		maybe_render(on_render)
 	else
@@ -938,49 +933,18 @@ function M.remove_due_date(win_id, on_render)
 	end
 end
 
--- group key mirrors the rendered grouping: origin + in-progress flag + priority name,
--- so a move only swaps within what the user sees as one group
-local function group_key(todo)
-	local origin = sorting.origin(todo)
-	if sorting.sequenced(todo) then
-		return origin .. ":sequence"
-	end
-	return origin .. ":" .. tostring(todo.in_progress and true or false) .. ":" .. (priority_name(todo) or "default")
-end
-
--- Swaps the todo at idx with its nearest visible sibling in `direction`; returns it, or nil.
--- Non-siblings are skipped, not swapped with: a subtree rides with its parent, so
--- swapping order_index with another parent's child moves nothing.
+-- Swaps the todo at idx with its nearest visible sibling in `direction`; returns the
+-- (reloaded) todo, or nil when it cannot move. The swap rules live in core's reorder_todo.
 local function swap_with_sibling(idx, direction)
 	local me = state.todos[idx]
 	if not me or me.done then
 		return nil
 	end
-	local step = (direction == "down") and 1 or -1
-	local target
-	local i = idx + step
-	while i >= 1 and i <= #state.todos do
-		local cand = state.todos[i]
-		if cand and not cand.done and tags_util.has_tag(cand.text, state.active_filter) and cand.parent_id == me.parent_id then
-			if group_key(cand) == group_key(me) then
-				target = i
-			end
-			break
-		end
-		i = i + step
-	end
-	if not target then
+	if not state.reorder(me.id, direction) then
 		return nil
 	end
-	local other = state.todos[target]
-	if sorting.sequenced(me) then
-		me.sequence, other.sequence = other.sequence, me.sequence
-	else
-		me.order_index, other.order_index = (other.order_index or target), (me.order_index or idx)
-	end
 	state.sort_todos()
-	state.save_to_disk()
-	return me
+	return state.get_todo_by_id(me.id)
 end
 
 function M.reorder_todo(win_id, on_render)
@@ -1029,7 +993,7 @@ function M.reorder_todo(win_id, on_render)
 
 		local new_index
 		for k, t in ipairs(state.todos) do
-			if t == me then
+			if t.id == me.id then
 				new_index = k
 				break
 			end
@@ -1049,12 +1013,6 @@ function M.reorder_todo(win_id, on_render)
 	local function exit_reorder_mode()
 		highlight(nil)
 		state.reordering_todo_index = nil
-
-		-- normalize order_index to dense array positions so future inserts stay ordered
-		for k, t in ipairs(state.todos) do
-			t.order_index = k
-		end
-		state.save_to_disk()
 
 		local function safe_del_keymap(key)
 			pcall(vim.keymap.del, "n", key, { buffer = buf_id })
@@ -1125,7 +1083,7 @@ end
 
 local function index_of(todo)
 	for i, t in ipairs(state.todos) do
-		if t == todo then
+		if t.id == todo.id then
 			return i
 		end
 	end
@@ -1168,7 +1126,7 @@ function M.move_todo(win_id, direction, on_render)
 	end
 	maybe_render(on_render)
 	for line, row in ipairs(require("doit.ui.main_window")._rendered_rows or {}) do
-		if row.todo == me then
+		if row.todo and row.todo.id == me.id then
 			pcall(vim.api.nvim_win_set_cursor, win_id, { line, 0 })
 			return
 		end

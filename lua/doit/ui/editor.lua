@@ -174,15 +174,21 @@ function M.edit_todo(todo, opts)
 			end
 			local text_lines, detail_lines = split_at_marker(buf_lines)
 			local text = join(text_lines)
-			if text ~= "" then
-				live.text = text
-			end
 			local details = join(detail_lines)
+			local changes = {}
+			if text ~= "" and text ~= live.text then
+				changes.text = text
+			end
 			if details ~= original_details then
-				live.description = footer.stamp(details)
+				changes.description = details
 				original_details = details
 			end
-			state.save_to_disk()
+			if next(changes) then
+				if not state.update_todo(todo.id, changes) then
+					return false
+				end
+				live = find_todo(state, todo.id) or live
+			end
 			if opts.on_saved then
 				opts.on_saved(live)
 			end
