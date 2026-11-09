@@ -154,7 +154,8 @@ export function readState(p) {
     } catch {
         // first run
     }
-    const sync = Boolean(serverUrl());
+    // the mode is the daemon's: readers (CLI, badges) take the file as written, whatever their own env says
+    const sync = prev.mode === "sync";
     return {
         mode: sync ? "sync" : "local",
         online: sync ? Boolean(prev.online) : null,
@@ -167,9 +168,14 @@ export function readState(p) {
     };
 }
 
-// surfaces read this file for their badge
+// written by the daemon only, so its env decides the mode; surfaces read this file for their badge
 export function writeState(p, extra = {}) {
-    const state = { ...readState(p), ...extra };
+    const sync = Boolean(serverUrl());
+    const state = { ...readState(p), mode: sync ? "sync" : "local", ...extra };
+    if (!sync) {
+        state.online = null;
+        state.error = null;
+    } else if (state.online === null) state.online = false;
     writeJsonAtomic(p.stateFile, state);
     return state;
 }
