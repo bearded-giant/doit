@@ -10,6 +10,8 @@ export DOIT_DATA_DIR="$TEST_TMPDIR/data"
 mkdir -p "$DOIT_DATA_DIR/lists"
 source "$REPO_ROOT/tmux/scripts/get-active-list.sh"
 source "$REPO_ROOT/tmux/scripts/lib-source.sh"
+source "$REPO_ROOT/tmux/scripts/lib-call.sh"
+start_doitd "$DOIT_DATA_DIR"
 
 echo '{"todos":[],"_metadata":{"created_at":1}}' > "$LISTS_DIR/unflagged.json"
 echo '{"todos":[],"_metadata":{"source":"user"}}' > "$LISTS_DIR/mine.json"

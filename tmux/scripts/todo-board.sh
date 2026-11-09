@@ -14,6 +14,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
 source "$SCRIPT_DIR/lib-source.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 shopt -s nullglob
 
 # integer: bash 3.2 read -t takes no fractions

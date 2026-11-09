@@ -250,10 +250,13 @@ get_active_list_name() {
     # derived/pinned lists are created on first use, the same way nvim's
     # load_list does; without this the missing-file fallback below would
     # bounce us back to daily
+    # doitd owns the list files; the status scripts run this every refresh, so with no daemon
+    # nothing is created (daily self-creates on its first write)
     if [[ -n "$ensure" && ! -f "$LISTS_DIR/${list_name}.json" ]]; then
-        mkdir -p "$LISTS_DIR"
-        printf '{"_metadata":{"created_at":%s,"updated_at":%s},"todos":[],"notes":[]}\n' \
-            "$(date +%s)" "$(date +%s)" > "$LISTS_DIR/${list_name}.json"
+        local sock="${DOIT_STATE_DIR:-$HOME/.local/state/doit}/doitd.sock"
+        [[ -S "$sock" ]] && curl -s --max-time 5 --unix-socket "$sock" -X POST http://doitd/call \
+            -H 'content-type: application/json' \
+            --data-binary "$(jq -cn --arg n "$list_name" '{tool: "create_list", args: {name: $n}, source: "user", active_list: $n}')" >/dev/null 2>&1
     fi
 
     # active list deleted out from under us? fall back so the UI still opens

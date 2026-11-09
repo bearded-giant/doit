@@ -6,7 +6,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
 source "$SCRIPT_DIR/lib-source.sh"
-source "$SCRIPT_DIR/lib-twin.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 source "$SCRIPT_DIR/lib-origin.sh"
 
 if ! command -v jq &> /dev/null; then
@@ -162,17 +162,7 @@ create_list() {
         return
     fi
 
-    # create new list with empty structure
-    cat > "$LISTS_DIR/${SAFE_NAME}.json" << EOF
-{
-  "todos": [],
-  "_metadata": {
-    "created_at": $(date +%s),
-    "updated_at": $(date +%s),
-    "source": "user"
-  }
-}
-EOF
+    doit_call create_list "$(jq -cn --arg n "$SAFE_NAME" '{name: $n, source: "user"}')" "$CURRENT_LIST" >/dev/null || { sleep 1; return; }
 
     echo "${COLOR_GREEN}Created list: $SAFE_NAME${COLOR_RESET}"
 
@@ -215,14 +205,9 @@ rename_list() {
         return
     fi
 
-    mv "$LISTS_DIR/${old_name}.json" "$LISTS_DIR/${SAFE_NAME}.json"
+    # the tool relabels owed twins; window links and session.json are this process's to move
+    doit_call rename_list "$(jq -cn --arg o "$old_name" --arg n "$SAFE_NAME" '{old_name: $o, new_name: $n}')" "$CURRENT_LIST" >/dev/null || { sleep 1; return; }
     relink_windows_for_list "$old_name" "$SAFE_NAME"
-    # a twin pair can sit inside this one list, so refs to the old name read as the new one
-    local ref
-    while IFS= read -r ref; do
-        twin_apply "$ref" relink "$SAFE_NAME" >/dev/null
-    done < <(jq -r --arg old "$old_name" --arg new "$SAFE_NAME" '.todos[] | .twin // empty | select(.list and .id)
-        | "\(if .list == $old then $new else .list end)\t\(.id)"' "$LISTS_DIR/${SAFE_NAME}.json")
 
     # update the link if this was the active list
     if [[ "$old_name" == "$CURRENT_LIST" ]]; then
@@ -254,9 +239,9 @@ delete_list() {
     read -r CONFIRM
 
     if [[ "$CONFIRM" == "yes" ]]; then
-        local archive="$DOIT_DATA_DIR/deleted/${list_name}-$(date +%s).json"
-        twin_detach_list "$LISTS_DIR/${list_name}.json" "$list_name" > /dev/null
-        mkdir -p "${archive%/*}" && mv "$LISTS_DIR/${list_name}.json" "$archive"
+        local out archive
+        out=$(doit_call delete_list "$(jq -cn --arg n "$list_name" '{name: $n}')" "$CURRENT_LIST") || { sleep 1; return; }
+        archive=$(sed -n 's/.*archived to \([^ ]*\).*/\1/p' <<< "$out" | head -1)
         prune_links_for_list "$list_name"
         echo "${COLOR_GREEN}Deleted: $list_name (archived to $archive)${COLOR_RESET}"
     else

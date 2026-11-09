@@ -15,8 +15,9 @@ mkdir -p "$DATA/lists"
 export DOIT_DATA_DIR="$DATA"
 
 SOCK="$TEST_TMPDIR/tmux.sock"
-trap 'tmux -S "$SOCK" kill-server 2>/dev/null; rm -rf "$TEST_TMPDIR"' EXIT
+trap 'tmux -S "$SOCK" kill-server 2>/dev/null; stop_doitd; rm -rf "$TEST_TMPDIR"' EXIT
 T() { tmux -S "$SOCK" "$@"; }
+start_doitd "$DATA"
 T -f /dev/null new-session -d -s s -n solo -x 80 -y 24
 for w in pair plain bare; do T new-window -d -t s: -n "$w"; done
 T split-window -d -t s:pair

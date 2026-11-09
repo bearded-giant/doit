@@ -16,8 +16,9 @@ mkdir -p "$DATA/lists"
 export DOIT_DATA_DIR="$DATA"
 
 SOCK="$TEST_TMPDIR/tmux.sock"
-trap 'tmux -S "$SOCK" kill-server 2>/dev/null; rm -rf "$TEST_TMPDIR"' EXIT
+trap 'tmux -S "$SOCK" kill-server 2>/dev/null; stop_doitd; rm -rf "$TEST_TMPDIR"' EXIT
 T() { tmux -S "$SOCK" "$@"; }
+start_doitd "$DATA"
 
 start_server() {
     T -f /dev/null new-session -d -s s -n edit -x 80 -y 24

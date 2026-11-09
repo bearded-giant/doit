@@ -3,7 +3,7 @@
 # List source: a list is the user's when `_metadata.source` is "user" (or it is
 # daily); anything else, unflagged included, counts as claude. The view filter
 # lives in session.json `source_filter` so every surface shares one toggle.
-# Needs get-active-list.sh sourced first (SESSION_FILE, LISTS_DIR, _update_session_file).
+# Needs get-active-list.sh and lib-call.sh sourced first (SESSION_FILE, LISTS_DIR, doit_call).
 
 DOIT_SOURCE_JQ='def is_mine($name): $name == "daily" or (._metadata.source? == "user");'
 
@@ -53,6 +53,5 @@ toggle_list_source() {
     [[ "$1" == daily ]] && { echo user; return 0; }
     [[ -f "$file" ]] || return 1
     if list_is_mine "$1"; then next=mcp; else next=user; fi
-    jq --arg s "$next" '._metadata = ((._metadata // {}) + {source: $s, updated_at: (now | floor)})' "$file" \
-        > "$file.tmp" && mv "$file.tmp" "$file" && echo "$next"
+    doit_call set_list_source "$(jq -cn --arg n "$1" --arg s "$next" '{name: $n, source: $s}')" "$1" >/dev/null && echo "$next"
 }
