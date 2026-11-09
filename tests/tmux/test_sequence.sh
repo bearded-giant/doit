@@ -50,6 +50,8 @@ assert_eq "1" "$(grep -F '[S1]' <<< "$FORMAT" | grep -c '\* 1) first step')"
 it "leaves an in-progress item out of the Sequence section"
 assert_eq "1" "$(( $(line_of R) < $(header_line Sequence) ))"
 
+start_doitd "$DATA"
+
 describe "todo-move.sh: Sequence reorder"
 
 env -u TMUX DOIT_DATA_DIR="$DATA" bash "$SCRIPTS/todo-move.sh" down "first step [S1]" > /dev/null 2>&1

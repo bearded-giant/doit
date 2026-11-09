@@ -107,6 +107,8 @@ assert_eq "pos($CB)" "$(jump down $(( CB - 2 )))"
 it "up from the first Claude row lands on the Claude banner"
 assert_eq "pos($CB)" "$(jump up "$CB")"
 
+start_doitd "$DATA"
+
 describe "todo-move.sh: never swaps across the Mine/Claude boundary"
 
 order_of() { jq -r --arg id "$1" '.todos[] | select(.id == $id) | .order_index' "$LIST"; }
@@ -185,8 +187,8 @@ ORDER_RE='mine urgent|mine default|claude critical'
 EXPECTED_ORDER='mine urgent|mine default|claude critical'
 
 mixed_list
-echo "7. typed by hand" | in_test_env bash "$SCRIPTS/todo-quick-add.sh" --process >/dev/null 2>&1
-it "quick-add stamps source user"
+in_test_env node "$SCRIPT_DIR/../../packages/cli/cli.js" add "7. typed by hand" -l orig >/dev/null 2>&1
+it "a hand-typed add stamps source user"
 assert_eq "user" "$(jq -r '.todos[] | select(.text == "7. typed by hand") | .source' "$LIST")"
 FORMAT=$(run_format)
 it "a hand-typed rank stays in the Mine block"

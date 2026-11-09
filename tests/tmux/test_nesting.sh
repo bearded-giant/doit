@@ -101,6 +101,8 @@ else
     FAILURES="${FAILURES}\n  - $CURRENT_TEST"
 fi
 
+start_doitd "$DATA"
+
 describe "todo-move.sh: subtree-aware reorder"
 
 order_of() {
