@@ -74,21 +74,13 @@ function M.toggle_list_source(name)
     end
 
     local next_source = M.is_mine(name, data._metadata) and "mcp" or "user"
-    data._metadata = type(data._metadata) == "table" and data._metadata or {}
-    data._metadata.source = next_source
-    data._metadata.updated_at = os.time()
-
-    file = io.open(path, "w")
-    if not file then
-        return nil, "Failed to write list '" .. name .. "'"
+    local sent, err = require("doit.client").call("set_list_source", { name = name, source = next_source },
+        { list = state.todo_lists.active, lists_dir = vim.fn.fnamemodify(path, ":h") })
+    if not sent then
+        return nil, "Failed to flip list '" .. name .. "': " .. tostring(err)
     end
-    file:write(vim.fn.json_encode(data))
-    file:close()
-
-    -- the next save_to_disk writes the in-memory metadata back over the file
-    if state.todo_lists and state.todo_lists.active == name and state.todo_lists.metadata then
-        state.todo_lists.metadata.source = next_source
-        state.todo_lists.metadata.updated_at = data._metadata.updated_at
+    if state.todo_lists and state.todo_lists.active == name then
+        state.load_list(name)
     end
     return next_source
 end

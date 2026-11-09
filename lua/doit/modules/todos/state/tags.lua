@@ -76,6 +76,9 @@ function M.setup(state)
     -- Rename a tag in all todos
     function M.rename_tag(old_tag, new_tag)
         local count = 0
+        local changes = {}
+        local changes = {}
+        local changes = {}
 
         for _, todo in ipairs(state.todos) do
             local changed = false
@@ -87,13 +90,12 @@ function M.setup(state)
             end)
 
             if changed then
-                todo.text = new_text
+                table.insert(changes, { id = todo.id, text = new_text })
                 count = count + 1
             end
         end
-
-        if count > 0 then
-            state.save_todos()
+        for _, change in ipairs(changes) do
+            state.update_todo(change.id, { text = change.text })
         end
 
         -- Update filter if needed
@@ -107,6 +109,9 @@ function M.setup(state)
     -- Delete a tag from all todos
     function M.delete_tag(tag)
         local count = 0
+        local changes = {}
+        local changes = {}
+        local changes = {}
 
         for _, todo in ipairs(state.todos) do
             local changed = false
@@ -125,13 +130,12 @@ function M.setup(state)
                     :gsub("[ \t]+\n", "\n")
                     :gsub("^[ \t]+", "")
                     :gsub("[ \t]+$", "")
-                todo.text = new_text
+                table.insert(changes, { id = todo.id, text = new_text })
                 count = count + 1
             end
         end
-
-        if count > 0 then
-            state.save_todos()
+        for _, change in ipairs(changes) do
+            state.update_todo(change.id, { text = change.text })
         end
 
         -- Clear filter if it was this tag

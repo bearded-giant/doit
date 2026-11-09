@@ -2,6 +2,8 @@
 local vim = vim
 
 local due_dates = require("doit.modules.todos.state.due_dates")
+local client = require("doit.client")
+local client = require("doit.client")
 
 -- the owed-items inbox; the MCP server and tmux refuse to delete or rename it too
 local PERMANENT_LIST = "daily"
@@ -165,7 +167,7 @@ function storage.setup(M)
     local default_list_name = config.default_list
         or (config.lists and config.lists.default_list)
         or "daily"
-    
+
     -- Ensure lists directory exists
     if not config.lists_dir then
         -- Check if lists configuration exists
@@ -183,11 +185,11 @@ function storage.setup(M)
             config.lists_dir = vim.fn.stdpath("data") .. "/doit/lists"
         end
     end
-    
+
     -- Create directory if it doesn't exist
     local mkdir_cmd = vim.fn.has("win32") == 1 and "mkdir" or "mkdir -p"
     vim.fn.system(mkdir_cmd .. " " .. vim.fn.shellescape(config.lists_dir))
-    
+
     -- Set default active list if not specified
     if not config.active_list then
         config.active_list = default_list_name
@@ -213,28 +215,28 @@ function storage.setup(M)
     -- Get list of available todo lists
     storage.get_available_lists = function()
         local lists = {}
-        
+
         -- Check if lists directory exists
         if vim.fn.isdirectory(config.lists_dir) == 0 then
             return lists
         end
-        
+
         -- Get all JSON files in the lists directory
         local ls_command = string.format("ls %s/*.json 2>/dev/null || true", vim.fn.shellescape(config.lists_dir))
         local output = vim.fn.systemlist(ls_command)
-        
+
         -- Parse list names
         for _, file_path in ipairs(output) do
             local name = file_path:match("[^/]+%.json$")
             if name then
                 name = name:gsub("%.json$", "")
-                
+
                 -- Load list metadata
                 local file = io.open(file_path, "r")
                 if file then
                     local content = file:read("*all")
                     file:close()
-                    
+
                     if content and content ~= "" then
                         local metadata = {}
                         local todo_count = 0
@@ -271,7 +273,7 @@ function storage.setup(M)
                         metadata.overdue_count = overdue_count
                         metadata.due_today_count = due_today_count
                         metadata.overdue_items = overdue_items
-                        
+
                         table.insert(lists, {
                             name = name,
                             path = file_path,
@@ -281,11 +283,11 @@ function storage.setup(M)
                 end
             end
         end
-        
+
         M.todo_lists.available = lists
         return lists
     end
-    
+
     -- Get the path for a specific list
     local function get_list_path(list_name)
         if not list_name or list_name == "" then
@@ -301,50 +303,65 @@ function storage.setup(M)
         return config.lists_dir .. "/" .. list_name .. ".json"
     end
     storage.get_list_path = get_list_path
-    
-    -- Create a new todo list
+
+    local function call(tool, args, active)
+        return client.call(tool, args, { list = active or M.todo_lists.active, lists_dir = config.lists_dir })
+    end
+
+    -- imported items arrive through add_todo one by one; done ones are completed afterwards
+    local function add_items(list_name, todos)
+        local footer = require("doit.core.utils.footer")
+        for _, todo in ipairs(todos or {}) do
+            if todo.text and todo.text ~= "" then
+                local ok, out = call("add_todo", {
+                    list = list_name,
+                    text = todo.text,
+                    priority = type(todo.priorities) == "string" and todo.priorities ~= "" and todo.priorities or nil,
+                    description = todo.description and footer.strip(todo.description) or nil,
+                    due = todo.due_date,
+                }, list_name)
+                local id = ok and out:match("%[id:([^%]]+)%]")
+                if id and todo.done then
+                    call("complete_todo", { list = list_name, id = id }, list_name)
+                end
+            end
+        end
+    end
+
+    -- Create a new todo list. metadata.auto marks a list the resolver creates on its own
+    -- (project or default list), which stays Claude's like tmux's auto-create; any other is the user's.
     storage.create_list = function(list_name, initial_todos, metadata)
         if not list_name or list_name == "" then
             return false, "Invalid list name"
         end
-        
-        -- Check if list already exists
+
         local list_path = get_list_path(list_name)
         if vim.fn.filereadable(list_path) == 1 then
             return false, "List '" .. list_name .. "' already exists"
         end
-        
-        -- Create the list file
-        local todos = serializable_todos(initial_todos)
-        local data = {
-            _metadata = metadata or {
-                created_at = os.time(),
-                updated_at = os.time()
-            },
-            todos = todos,
-            notes = {}
-        }
-        
-        local file = io.open(list_path, "w")
-        if not file then
-            return false, "Failed to create list file"
+
+        local args = { name = list_name }
+        if not (metadata and (metadata.auto or metadata.source == "mcp")) then
+            args.source = "user"
         end
-        
-        file:write(vim.fn.json_encode(data))
-        file:close()
-        
+        local ok, err = call("create_list", args)
+        if not ok then
+            return false, "Failed to create list: " .. tostring(err)
+        end
+        add_items(list_name, initial_todos)
+
         -- Update available lists
         storage.get_available_lists()
-        
+
         return true, "Created list '" .. list_name .. "'"
     end
-    
+
     -- Load a specific todo list
     storage.load_list = function(list_name)
         if not list_name or list_name == "" then
             list_name = default_list_name
         end
-        
+
         local list_path = get_list_path(list_name)
         M.todo_lists.base = nil
 
@@ -352,24 +369,24 @@ function storage.setup(M)
         if config.development_mode then
             vim.notify(string.format("Loading list '%s' from path: %s", list_name, list_path), vim.log.levels.DEBUG)
         end
-        
+
         -- Check if file exists, if not create a default list
         if vim.fn.filereadable(list_path) == 0 then
-            storage.create_list(list_name, {})
+            storage.create_list(list_name, {}, { auto = true })
         end
-        
+
         local file = io.open(list_path, "r")
         if file then
             local content = file:read("*all")
             file:close()
-            
+
             if content and content ~= "" then
                 local data = {}
                 local success, decoded = pcall(vim.fn.json_decode, content)
-                
+
                 if success and decoded then
                     data = decoded
-                    
+
                     -- Extract todos and metadata
                     M.todos = data.todos or {}
                     M.todo_lists.metadata = data._metadata or {
@@ -377,7 +394,7 @@ function storage.setup(M)
                         updated_at = os.time()
                     }
                     M.todo_lists.notes = data.notes or {}
-                    
+
                     local needs_migration = scrub_transient(M.todos)
 
                     -- Migration: Add order_index if missing
@@ -426,13 +443,13 @@ function storage.setup(M)
                             needs_migration = true
                         end
                     end
-                    
+
                     -- Migration: Convert priorities from array to string
                     for _, todo in ipairs(M.todos) do
                         if todo.priorities and type(todo.priorities) == "table" then
                             local highest_priority = nil
                             local highest_weight = 0
-                            
+
                             for _, prio_name in ipairs(todo.priorities) do
                                 for _, p in ipairs(config.priorities or {}) do
                                     if p.name == prio_name and (p.weight or 0) > highest_weight then
@@ -441,28 +458,25 @@ function storage.setup(M)
                                     end
                                 end
                             end
-                            
+
                             todo.priorities = highest_priority
                             needs_migration = true
                         end
                     end
-                    
+
                     -- Update active list BEFORE any migration save: save_to_disk resolves
                     -- its path from M.todo_lists.active, so migrating during a list switch
                     -- would write these todos into the previously-active list's file.
                     M.todo_lists.active = list_name
                     config.active_list = list_name
 
-                    if needs_migration then
-                        storage.save_to_disk()
-                    end
                     take_snapshot(list_name, list_path)
 
                     return true, "Loaded list '" .. list_name .. "'"
                 end
             end
         end
-        
+
         -- If loading failed, initialize with empty list
         M.todos = {}
         M.todo_lists.metadata = {}
@@ -483,7 +497,7 @@ function storage.setup(M)
         storage.load_list(list_name)
         return true
     end
-    
+
     -- persists the link; load_list alone must not, it also runs for startup restore, previews and moves
     storage.switch_list = function(list_name)
         local ok, msg = storage.load_list(list_name)
@@ -501,25 +515,23 @@ function storage.setup(M)
         if list_name == PERMANENT_LIST then
             return false, PERMANENT_LIST .. " is permanent; it can't be deleted"
         end
-        
+
         local list_path = get_list_path(list_name)
-        
+
         -- Check if file exists
         if vim.fn.filereadable(list_path) == 0 then
             return false, "List does not exist"
         end
-        
-        require("doit.modules.todos.state.twin").detach_list(list_name)
-        local archive_dir = vim.fn.fnamemodify(list_path, ":h:h") .. "/deleted"
-        vim.fn.mkdir(archive_dir, "p")
-        local success, err = os.rename(list_path, string.format("%s/%s-%d.json", archive_dir, list_name, os.time()))
-        if not success then
-            return false, "Failed to delete list: " .. (err or "unknown error")
+
+        -- the tool archives the file under deleted/ and detaches owed twins on other lists
+        local ok, err = call("delete_list", { name = list_name })
+        if not ok then
+            return false, "Failed to delete list: " .. tostring(err)
         end
-        
+
         -- Update available lists
         storage.get_available_lists()
-        
+
         -- if we deleted the active list, switch to first available
         if M.todo_lists.active == list_name then
             local available = storage.get_available_lists()
@@ -529,10 +541,10 @@ function storage.setup(M)
                 storage.load_list(default_list_name)
             end
         end
-        
+
         return true, "Deleted list '" .. list_name .. "'"
     end
-    
+
     -- Rename a todo list
     storage.rename_list = function(old_name, new_name)
         if not old_name or old_name == "" or not new_name or new_name == "" then
@@ -541,74 +553,44 @@ function storage.setup(M)
         if old_name == PERMANENT_LIST then
             return false, PERMANENT_LIST .. " is permanent; it can't be renamed"
         end
-        
+
         local old_path = get_list_path(old_name)
         local new_path = get_list_path(new_name)
-        
+
         -- Check if source exists and destination doesn't
         if vim.fn.filereadable(old_path) == 0 then
             return false, "Source list does not exist"
         end
-        
+
         if vim.fn.filereadable(new_path) == 1 then
             return false, "Destination list already exists"
         end
-        
-        -- Rename file
-        local success = os.rename(old_path, new_path)
-        if not success then
-            return false, "Failed to rename list"
+
+        -- the tool renames the file and relabels owed twins; window links are this process's to move
+        local ok, err = call("rename_list", { old_name = old_name, new_name = new_name })
+        if not ok then
+            return false, "Failed to rename list: " .. tostring(err)
         end
-        
+
         -- Update available lists
         storage.get_available_lists()
-        
+
         -- If we renamed the active list, update active list name
         if M.todo_lists.active == old_name then
             M.todo_lists.active = new_name
             config.active_list = new_name
-            
+
             -- Update session with new name
             local session = require("doit.modules.todos.state.session")
             session.save_session(new_name)
         end
         require("doit.modules.todos.state.session").relink_list(old_name, new_name)
 
-        require("doit.modules.todos.state.twin").relink_list(new_name)
-        
         return true, "Renamed list '" .. old_name .. "' to '" .. new_name .. "'"
     end
-    
+
     -- Load from disk (compatibility with older versions)
     storage.load_from_disk = function()
-        -- handle migration from old save path (only once)
-        local migration_marker = config.lists_dir .. "/.migrated"
-        if config.save_path and vim.fn.filereadable(config.save_path) == 1 and
-           vim.fn.filereadable(migration_marker) == 0 and
-           vim.fn.filereadable(get_list_path(default_list_name)) == 0 then
-            local file = io.open(config.save_path, "r")
-            if file then
-                local content = file:read("*all")
-                file:close()
-
-                if content and content ~= "" then
-                    local success, todos = pcall(vim.fn.json_decode, content)
-                    if success and todos then
-                        storage.create_list(default_list_name, todos, {
-                            migrated_from = config.save_path,
-                            migrated_at = os.time()
-                        })
-                    end
-                end
-            end
-            -- mark migration as done so it never re-runs
-            local marker = io.open(migration_marker, "w")
-            if marker then
-                marker:write(tostring(os.time()))
-                marker:close()
-            end
-        end
-        
         -- Try to restore last session's list. Inside tmux the window's linked
         -- list wins (from_link), and an explicit link also outranks project
         -- derivation below.
@@ -643,55 +625,10 @@ function storage.setup(M)
         -- Get available lists
         storage.get_available_lists()
     end
-    
-    -- Save to disk with multi-list support
+
+    -- doitd is the only writer of the list files; every change is a tool call that reloads the list
     storage.save_to_disk = function()
-        local list_name = M.todo_lists.active or default_list_name
-        local list_path = get_list_path(list_name)
-
-        local base = M.todo_lists.base
-        if base and base.list == list_name and base.stamp ~= disk_stamp(list_path) then
-            local theirs = read_list_file(list_path)
-            if theirs then
-                M.todos = merge_items(base.todos, M.todos, theirs.todos)
-                M.todo_lists.notes = merge_items(base.notes, M.todo_lists.notes, theirs.notes)
-                local metadata = M.todo_lists.metadata or {}
-                assign(metadata, merge_fields(base.metadata, metadata, theirs._metadata))
-                M.todo_lists.metadata = metadata
-            end
-        end
-
-        local metadata = M.todo_lists.metadata or {}
-        metadata.updated_at = os.time()
-        M.todo_lists.metadata = metadata
-
-        local data = {
-            _metadata = metadata,
-            todos = serializable_todos(M.todos),
-            notes = M.todo_lists.notes or {}
-        }
-        local content = vim.fn.json_encode(data)
-
-        -- tmp + rename so tmux and the MCP never read a half-written file
-        local tmp_path = list_path .. ".nvim.tmp"
-        local written = false
-        local tmp = io.open(tmp_path, "w")
-        if tmp then
-            tmp:write(content)
-            tmp:close()
-            written = os.rename(tmp_path, list_path) == true
-        end
-        if not written then
-            local file = io.open(list_path, "w")
-            if not file then
-                return false
-            end
-            file:write(content)
-            file:close()
-        end
-
-        take_snapshot(list_name, list_path)
-        return true
+        error("doit: lists are written by doitd; call the tool for the change instead of save_to_disk")
     end
 
     -- List-scoped scratch notes (stored in the active list's JSON top-level `notes`)
@@ -701,49 +638,42 @@ function storage.setup(M)
     end
 
     storage.add_note = function(title, body, todo_ids)
-        local notes = storage.get_notes()
-        local now = os.time()
-        local note = {
-            id = require("doit.core.utils.id").generate(notes),
+        local ok, out = call("create_note", {
+            list = M.todo_lists.active,
             title = title or "",
             body = body or "",
-            created_at = now,
-            updated_at = now,
-        }
-        if todo_ids and #todo_ids > 0 then
-            note.todo_ids = todo_ids
+            todo_ids = (todo_ids and #todo_ids > 0) and todo_ids or nil,
+        })
+        if not ok then
+            return nil
         end
-        table.insert(notes, note)
-        storage.save_to_disk()
-        return note
+        storage.load_list(M.todo_lists.active)
+        local id = out:match("%[id:([^%]]+)%]")
+        for _, note in ipairs(storage.get_notes()) do
+            if note.id == id then
+                return note
+            end
+        end
     end
 
     storage.update_note = function(note_id, title, body, todo_ids)
-        for _, note in ipairs(storage.get_notes()) do
-            if note.id == note_id then
-                if title ~= nil then note.title = title end
-                if body ~= nil then note.body = body end
-                if todo_ids ~= nil then
-                    note.todo_ids = #todo_ids > 0 and todo_ids or nil
-                end
-                note.updated_at = os.time()
-                storage.save_to_disk()
-                return true
-            end
+        local args = { list = M.todo_lists.active, id = note_id, title = title, body = body }
+        if todo_ids ~= nil then
+            args.todo_ids = todo_ids
         end
-        return false
+        local ok = call("update_note", args)
+        if ok then
+            storage.load_list(M.todo_lists.active)
+        end
+        return ok and true or false
     end
 
     storage.delete_note = function(note_id)
-        local notes = storage.get_notes()
-        for i, note in ipairs(notes) do
-            if note.id == note_id then
-                table.remove(notes, i)
-                storage.save_to_disk()
-                return true
-            end
+        local ok = call("delete_note", { list = M.todo_lists.active, id = note_id })
+        if ok then
+            storage.load_list(M.todo_lists.active)
         end
-        return false
+        return ok and true or false
     end
 
     storage.import_todos = function(file_path, list_name)
@@ -751,7 +681,7 @@ function storage.setup(M)
         if not list_name then
             list_name = M.todo_lists.active or default_list_name
         end
-        
+
         local file = io.open(file_path, "r")
         if not file then
             return false, "Could not open file: " .. file_path
@@ -764,11 +694,11 @@ function storage.setup(M)
         if not status then
             return false, "Error parsing JSON file"
         end
-        
+
         -- Check if the imported file has the new format (with _metadata and todos)
         local imported_todos = nil
         local imported_metadata = nil
-        
+
         if imported_data.todos and type(imported_data.todos) == "table" then
             -- New format with metadata
             imported_todos = imported_data.todos
@@ -779,11 +709,11 @@ function storage.setup(M)
         else
             return false, "Invalid format in imported file"
         end
-        
+
         if not imported_todos then
             return false, "No todos found in imported file"
         end
-        
+
         -- Handle importing to a new list
         if list_name ~= M.todo_lists.active then
             -- Create a new list with the imported todos
@@ -791,34 +721,15 @@ function storage.setup(M)
             if not success then
                 return false, msg
             end
-            
+
             -- Switch to the new list
             storage.switch_list(list_name)
             return true, string.format("Created new list '%s' with %d imported todos", list_name, #imported_todos)
         end
-        
+
         -- Otherwise, merge with current list
-        for _, todo in ipairs(imported_todos) do
-            todo = strip_transient(todo)
-
-            -- Ensure each todo has an ID
-            if not todo.id then
-                todo.id = require("doit.core.utils.id").generate(M.todos)
-            end
-            
-            -- Add order_index if missing
-            if not todo.order_index then
-                todo.order_index = #M.todos + 1
-            end
-            
-            table.insert(M.todos, todo)
-        end
-
-        if M.sort_todos then
-            M.sort_todos() -- from sorting.lua
-        end
-        
-        storage.save_to_disk()
+        add_items(list_name, imported_todos)
+        storage.load_list(list_name)
         return true, string.format("Imported %d todos to list '%s'", #imported_todos, list_name)
     end
 
@@ -827,9 +738,9 @@ function storage.setup(M)
         if not file then
             return false, "Could not open file for writing: " .. file_path
         end
-        
+
         local json_content = ""
-        
+
         if export_format == "simple" then
             -- Simple format - just an array of todos
             json_content = vim.fn.json_encode(serializable_todos(M.todos))
@@ -844,10 +755,10 @@ function storage.setup(M)
             }
             json_content = vim.fn.json_encode(data)
         end
-        
+
         file:write(json_content)
         file:close()
-        
+
         return true, string.format("Exported %d todos from list '%s' to %s",
                                    #M.todos, M.todo_lists.active, file_path)
     end
@@ -909,143 +820,15 @@ function storage.setup(M)
         if not destination_list_name or destination_list_name == "" then
             return false, "Invalid destination list name"
         end
-
-        -- Ensure we have the latest state
-        if not M.todos or #M.todos == 0 then
-            return false, "No todos in current list"
-        end
-
-        -- Find the todo in the current list
-        local todo_to_move = nil
-        local todo_index = nil
-
-        for i, todo in ipairs(M.todos) do
-            -- Handle both old format (no ID) and new format (with ID)
-            local current_id = todo.id or (todo.created_at and (todo.created_at .. "_" .. i))
-            if current_id == todo_id then
-                todo_to_move = vim.deepcopy(todo)
-                todo_index = i
-                break
-            end
-        end
-
-        if not todo_to_move then
-            -- Debug: List all todo IDs to help diagnose
-            local available_ids = {}
-            for i, todo in ipairs(M.todos) do
-                table.insert(available_ids, todo.id or "no-id")
-            end
-            return false, string.format("Todo with ID '%s' not found. Available: %s",
-                tostring(todo_id), table.concat(available_ids, ", "))
-        end
-
-        -- Verify destination list exists
-        local dest_list_path = get_list_path(destination_list_name)
-        if vim.fn.filereadable(dest_list_path) == 0 then
+        if vim.fn.filereadable(get_list_path(destination_list_name)) == 0 then
             return false, "Destination list does not exist"
         end
-
-        -- IMPORTANT: Create backup of current state before ANY modifications
-        local backup_todos = vim.deepcopy(M.todos)
-        local backup_metadata = vim.deepcopy(M.todo_lists.metadata)
-
         local source_list_name = M.todo_lists.active or default_list_name
-        local source_list_path = get_list_path(source_list_name)
-
-        -- Load destination list
-        local file = io.open(dest_list_path, "r")
-        if not file then
-            return false, "Could not open destination list"
+        local ok, err = call("move_todo", { id = todo_id, from_list = source_list_name, to_list = destination_list_name })
+        if not ok then
+            return false, tostring(err)
         end
-
-        local content = file:read("*all")
-        file:close()
-
-        local dest_data = {}
-        local success, decoded = pcall(vim.fn.json_decode, content)
-        if not success or not decoded then
-            return false, "Failed to parse destination list"
-        end
-
-        dest_data = decoded
-        local dest_todos = dest_data.todos or {}
-
-        -- Prepare destination data (without modifying M.todos yet)
-        local updated_todo = strip_transient(vim.deepcopy(todo_to_move))
-        updated_todo.order_index = #dest_todos + 1
-        -- a run-queue position means nothing in another list's queue
-        updated_todo.sequence = nil
-        table.insert(dest_todos, updated_todo)
-
-        dest_data.todos = dest_todos
-        dest_data._metadata = dest_data._metadata or {}
-        dest_data._metadata.updated_at = os.time()
-
-        -- Prepare source data (create modified copy without touching M.todos)
-        local source_todos = vim.deepcopy(M.todos)
-        table.remove(source_todos, todo_index)
-
-        -- Update order_index for remaining todos in the copy
-        for i = todo_index, #source_todos do
-            source_todos[i].order_index = i
-        end
-
-        local source_data = {
-            _metadata = vim.deepcopy(M.todo_lists.metadata) or {},
-            todos = serializable_todos(source_todos),
-            notes = M.todo_lists.notes or {}
-        }
-        source_data._metadata.updated_at = os.time()
-
-        -- Now try to save both files WITHOUT modifying M.todos yet
-        -- Save destination first
-        local dest_file = io.open(dest_list_path, "w")
-        if not dest_file then
-            -- Nothing modified yet, safe to return
-            return false, "Failed to open destination list for writing"
-        end
-
-        local dest_json = vim.fn.json_encode(dest_data)
-        local write_success = pcall(function()
-            dest_file:write(dest_json)
-            dest_file:close()
-        end)
-
-        if not write_success then
-            pcall(function() dest_file:close() end)
-            -- Nothing modified yet, safe to return
-            return false, "Failed to write to destination list"
-        end
-
-        -- Save source list
-        local source_file = io.open(source_list_path, "w")
-        if not source_file then
-            -- Destination was saved, but we failed to save source
-            -- This is a problem, but at least in-memory state is still intact
-            return false, "Failed to open source list for writing (destination was updated)"
-        end
-
-        local source_json = vim.fn.json_encode(source_data)
-        write_success = pcall(function()
-            source_file:write(source_json)
-            source_file:close()
-        end)
-
-        if not write_success then
-            pcall(function() source_file:close() end)
-            -- Both files might be in inconsistent state, but in-memory is still intact
-            -- Restore in-memory state to be safe
-            return false, "Failed to write to source list (destination was updated)"
-        end
-
-        -- SUCCESS: Both files saved successfully
-        -- Now and ONLY now update the in-memory state
-        M.todos = source_todos
-        if M.todo_lists.metadata then
-            M.todo_lists.metadata.updated_at = os.time()
-        end
-        require("doit.modules.todos.state.twin").sync(todo_to_move, "relink", destination_list_name)
-
+        storage.load_list(source_list_name)
         return true, string.format("Moved todo to list '%s'", destination_list_name)
     end
 

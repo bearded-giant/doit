@@ -1,79 +1,59 @@
-local twin = require("doit.modules.todos.state.twin")
+local ops = require("doit.modules.todos.state.ops")
 
 local M = {}
 
 function M.setup(state)
-    local function generate_todo_id()
-        return require("doit.core.utils.id").generate(state.todos)
-    end
-    
-    -- Re-depth a subtree in place, keeping its parent links intact.
-    local function redepth(parent_id, depth)
-        for _, todo in ipairs(state.todos) do
-            if todo.parent_id == parent_id then
-                todo.depth = depth
-                redepth(todo.id, depth + 1)
-            end
-        end
+    local function by_index(index)
+        return state.todos[index]
     end
 
-    -- Promote a deleted todo's DIRECT children to top level. Their own
-    -- descendants stay attached to them and are only re-depthed — a grandchild
-    -- must not be orphaned just because its grandparent went away. Completion is
-    -- per-item (no cascade), so a child never vanishes because its parent did.
-    local function promote_children(parent_id)
-        if not parent_id then
-            return
+    local function id_args(todo, extra)
+        local args = { id = todo.id, list = state.todo_lists.active }
+        for k, v in pairs(extra or {}) do
+            args[k] = v
         end
-        for _, todo in ipairs(state.todos) do
-            if todo.parent_id == parent_id then
-                todo.parent_id = nil
-                todo.depth = 0
-                redepth(todo.id, 1)
-            end
-        end
+        return args
     end
-    M.promote_children = promote_children
+
+    -- one level, like tmux u: the last status change, else the last delete
+    local function remember_status(todo)
+        state.last_undo = {
+            kind = "status",
+            id = todo.id,
+            done = todo.done == true,
+            in_progress = todo.in_progress == true,
+        }
+    end
 
     function M.add_todo(text, priorities, parent_id)
-        local parent = parent_id and M.get_todo_by_id(parent_id) or nil
-
-        local new_todo = {
-            id = generate_todo_id(),
+        local priority = priorities
+        if type(priorities) == "table" then
+            priority = priorities[1]
+        end
+        if priority == "" then
+            priority = nil
+        end
+        -- a parent that is not on the list means top level, as the old in-memory add did
+        if parent_id and not ops.by_id(parent_id) then
+            parent_id = nil
+        end
+        local ok, out = ops.call("add_todo", {
+            list = state.todo_lists.active,
             text = text,
-            done = false,
-            created_at = os.time(),
-            order_index = #state.todos + 1,
-            description = require("doit.core.utils.footer").stamp(""),
-            source = "user",
-        }
-
-        if parent then
-            new_todo.parent_id = parent.id
-            new_todo.depth = (parent.depth or 0) + 1
+            priority = priority,
+            parent = parent_id,
+        })
+        if not ok then
+            return nil
         end
-
-        if priorities and #priorities > 0 then
-            new_todo.priorities = priorities
-        end
-        
-        table.insert(state.todos, new_todo)
-        state.save_todos()
-        
-        return new_todo
+        return ops.by_id(ops.id_from(out))
     end
-    
+
     function M.get_todo_by_id(id)
         if not id then return nil end
-        
-        for _, todo in ipairs(state.todos) do
-            if todo.id == id then
-                return todo
-            end
-        end
-        return nil
+        return ops.by_id(id)
     end
-    
+
     function M.get_todos_by_note_id(note_id)
         if not note_id then return {} end
 
@@ -86,97 +66,47 @@ function M.setup(state)
         return linked_todos
     end
 
-    -- Move a todo from current list to another list
-    function M.move_todo_to_list(todo_index, target_list_name)
-        if not state.todos[todo_index] then
-            return false, "Todo not found at index " .. todo_index
+    -- changes: text, description, priority ("none" clears), due ("" clears), sequence (0 clears),
+    -- in_progress, parent ("" unnests), fields (surface-owned keys; vim.NIL clears one)
+    function M.update_todo(id, changes)
+        local args = { id = id, list = state.todo_lists.active }
+        for k, v in pairs(changes or {}) do
+            args[k] = v
         end
-
-        local current_list = state.todo_lists.active
-        if current_list == target_list_name then
-            return false, "Todo is already in list '" .. target_list_name .. "'"
-        end
-
-        -- Get the todo and create a deep copy
-        local todo = vim.deepcopy(state.todos[todo_index])
-
-        -- Remove from current list
-        table.remove(state.todos, todo_index)
-        state.save_todos()
-
-        -- Switch to target list
-        local success, msg = state.load_list(target_list_name)
-        if not success then
-            -- If target list doesn't exist, create it
-            state.create_list(target_list_name, {})
-            state.load_list(target_list_name)
-        end
-
-        -- Add to target list
-        todo.order_index = #state.todos + 1
-        table.insert(state.todos, todo)
-        state.save_todos()
-
-        -- Fire event for move operation
-        local core = require("doit.core")
-        if core and core.emit then
-            core.emit("todo:moved", {
-                todo = todo,
-                from_list = current_list,
-                to_list = target_list_name
-            })
-        end
-
-        -- Switch back to original list
-        state.load_list(current_list)
-
-        return true, "Moved todo to '" .. target_list_name .. "'"
+        return ops.call("update_todo", args)
     end
-    
-    -- one level, like tmux u: the last status change, else the last delete
-    local function remember_status(todo)
-        state.last_undo = {
-            kind = "status",
-            id = todo.id,
-            done = todo.done == true,
-            in_progress = todo.in_progress == true,
-            completed_at = todo.completed_at,
-        }
+
+    function M.set_priority(id, name)
+        return M.update_todo(id, { priority = name or "none" })
+    end
+
+    -- reorder one step inside the item's section; the swap rules live in core's reorder_todo
+    function M.reorder(id, direction)
+        return ops.call("reorder_todo", { id = id, list = state.todo_lists.active, direction = direction })
+    end
+
+    local STATUS_TOOL = { start = "start_todo", complete = "complete_todo", revert = "revert_todo" }
+
+    function M.set_status(todo, action)
+        return ops.call(STATUS_TOOL[action], id_args(todo))
     end
 
     function M.start_todo(index)
-        local todo = state.todos[index]
+        local todo = by_index(index)
         if not todo then
             return
         end
         remember_status(todo)
-        local was_done = todo.done
-        -- one item in progress per list, as tmux and the MCP enforce
-        for _, other in ipairs(state.todos) do
-            if other ~= todo and other.in_progress then
-                other.in_progress = false
-            end
-        end
-        todo.in_progress = true
-        todo.done = false
-        todo.completed_at = nil
-        state.save_todos()
-        if was_done then
-            twin.sync(todo, "revert")
-        end
+        M.set_status(todo, "start")
     end
 
     function M.complete_todo(index)
-        local todo = state.todos[index]
+        local todo = by_index(index)
         if not todo or todo.done then
             return
         end
         remember_status(todo)
-        todo.done = true
-        todo.in_progress = false
-        todo.completed_at = os.time()
-        state.save_todos()
-        twin.sync(todo, "complete", todo.completed_at)
+        M.set_status(todo, "complete")
     end
 
     function M.undo_last()
@@ -187,174 +117,112 @@ function M.setup(state)
             if not todo then
                 return false
             end
-            local was_done = todo.done == true
-            todo.done, todo.in_progress, todo.completed_at = last.done, last.in_progress, last.completed_at
-            state.save_todos()
-            if todo.done ~= was_done then
-                twin.sync(todo, todo.done and "complete" or "revert", todo.completed_at)
+            -- back to the status it had; the tool re-stamps completed_at and mirrors an owed twin
+            if last.done then
+                M.set_status(todo, "complete")
+            elseif last.in_progress then
+                M.set_status(todo, "start")
+            else
+                M.set_status(todo, "revert")
             end
             return true
         end
         return M.undo_delete()
     end
 
+    -- pending -> in_progress -> done -> pending
     function M.toggle_todo(index)
-        if state.todos[index] then
-            local todo = state.todos[index]
-            remember_status(todo)
-            local was_done = todo.done
-            
-            -- Cycle through states: pending -> in_progress -> done -> pending
-            if not todo.in_progress and not todo.done then
-                -- Pending -> In Progress
-                todo.in_progress = true
-                todo.done = false
-                todo.completed_at = nil
-            elseif todo.in_progress and not todo.done then
-                -- In Progress -> Done
-                todo.in_progress = false
-                todo.done = true
-                todo.completed_at = os.time()
-            else
-                -- Done -> Pending (reset both)
-                todo.in_progress = false
-                todo.done = false
-                todo.completed_at = nil
-            end
-
-            state.save_todos()
-            if todo.done ~= was_done then
-                twin.sync(todo, todo.done and "complete" or "revert", todo.completed_at)
-            end
+        local todo = by_index(index)
+        if not todo then
+            return
+        end
+        remember_status(todo)
+        if todo.done then
+            M.set_status(todo, "revert")
+        elseif todo.in_progress then
+            M.set_status(todo, "complete")
+        else
+            M.set_status(todo, "start")
         end
     end
-    
+
     function M.set_in_progress(index, value)
-        if state.todos[index] then
-            state.todos[index].in_progress = value
-            state.save_todos()
+        local todo = by_index(index)
+        if todo then
+            M.update_todo(todo.id, { in_progress = value and true or false })
         end
     end
 
     function M.revert_to_pending(index)
-        if state.todos[index] then
-            remember_status(state.todos[index])
-            state.todos[index].in_progress = false
-            state.todos[index].done = false
-            state.todos[index].completed_at = nil
-            state.save_todos()
-            twin.sync(state.todos[index], "revert")
+        local todo = by_index(index)
+        if todo then
+            remember_status(todo)
+            M.set_status(todo, "revert")
         end
     end
-    
+
+    -- deletes become tombstones on the list (the tool keeps the last 10); undo restores by id
     function M.delete_todo(index)
-        if state.todos[index] then
-            local todo = state.todos[index]
-            todo.delete_time = os.time()
-
-            promote_children(todo.id)
-
-            table.insert(state.deleted_todos, 1, todo)
-            table.remove(state.todos, index)
+        local todo = by_index(index)
+        if not todo then
+            return
+        end
+        if ops.call("delete_todo", id_args(todo)) then
+            table.insert(state.deleted_todos, 1, vim.deepcopy(todo))
+            state.deleted_todos[state.MAX_UNDO_HISTORY + 1] = nil
             state.last_undo = { kind = "delete" }
-            
-            if #state.deleted_todos > state.MAX_UNDO_HISTORY then
-                state.deleted_todos[state.MAX_UNDO_HISTORY + 1] = nil
-            end
-            
-            state.save_todos()
-            twin.sync(todo, "delete")
         end
     end
-    
+
     function M.delete_completed()
-        local deleted_count = 0
-        
-        for i = #state.todos, 1, -1 do
-            if state.todos[i].done then
-                local todo = state.todos[i]
-                todo.delete_time = os.time()
-
-                -- incomplete children outlive a completed parent
-                promote_children(todo.id)
-
-                table.insert(state.deleted_todos, 1, todo)
-                table.remove(state.todos, i)
-
-                deleted_count = deleted_count + 1
+        local done = 0
+        for _, todo in ipairs(state.todos) do
+            if todo.done then
+                done = done + 1
             end
         end
-        
-        while #state.deleted_todos > state.MAX_UNDO_HISTORY do
-            table.remove(state.deleted_todos)
+        if done == 0 then
+            return 0
         end
-        
-        if deleted_count > 0 then
-            state.save_todos()
-        end
-        
-        return deleted_count
+        return ops.call("clear_done", { list = state.todo_lists.active }) and done or 0
     end
-    
+
     function M.undo_delete()
-        if #state.deleted_todos > 0 then
-            local todo = table.remove(state.deleted_todos, 1)
-
-            todo.delete_time = nil
-
-            -- the parent may be gone since the delete; never restore a dangling link
-            if todo.parent_id and not M.get_todo_by_id(todo.parent_id) then
-                todo.parent_id = nil
-                todo.depth = 0
-            end
-
-            todo.order_index = #state.todos + 1
-
-            table.insert(state.todos, todo)
-            state.save_todos()
-            twin.sync(todo, "restore")
-
-            return true
+        local todo = table.remove(state.deleted_todos, 1)
+        if not todo then
+            return false
         end
-
-        return false
+        return (ops.call("restore_todo", { id = todo.id, list = state.todo_lists.active }))
     end
-    
+
     function M.edit_todo(index, new_text)
-        if state.todos[index] then
-            local todo = state.todos[index]
-            todo.text = new_text
-            
-            state.save_todos()
+        local todo = by_index(index)
+        if todo then
+            M.update_todo(todo.id, { text = new_text })
         end
     end
-    
+
+    -- through the state table so a spec with a fake state can stand in for the tool
+    local function update(id, changes)
+        return (state.update_todo or M.update_todo)(id, changes)
+    end
+
     function M.link_todo_to_note(todo_index, note_id, note_summary)
-        if not state.todos[todo_index] then
+        local todo = by_index(todo_index)
+        if not todo then
             return false
         end
-        
-        state.todos[todo_index].note_id = note_id
-        state.todos[todo_index].note_summary = note_summary
-        state.todos[todo_index].note_updated_at = os.time()
-        state.save_todos()
-        
-        return true
+        return (update(todo.id, { fields = { note_id = note_id, note_summary = note_summary, note_updated_at = os.time() } }))
     end
-    
+
     function M.unlink_todo_from_note(todo_index)
-        if not state.todos[todo_index] then
+        local todo = by_index(todo_index)
+        if not todo then
             return false
         end
-        
-        state.todos[todo_index].note_id = nil
-        state.todos[todo_index].note_summary = nil
-        state.todos[todo_index].note_updated_at = nil
-        state.save_todos()
-        
-        return true
+        return (update(todo.id, { fields = { note_id = vim.NIL, note_summary = vim.NIL, note_updated_at = vim.NIL } }))
     end
-    
+
     -- Indices of todos that repeat an earlier todo's normalized text. The first
     -- occurrence is always the keeper, so this is stable under re-runs.
     local function duplicate_indices()
@@ -417,29 +285,16 @@ function M.setup(state)
 
     function M.remove_duplicates()
         local dupes = duplicate_indices()
-
-        -- descending so earlier indices stay valid, and routed through the same
-        -- bookkeeping as delete_todo so `u` can restore a mistaken dedupe
-        table.sort(dupes, function(a, b) return a > b end)
-
+        if #dupes == 0 then
+            return 0
+        end
         for _, idx in ipairs(dupes) do
-            local todo = state.todos[idx]
-            todo.delete_time = os.time()
-            table.insert(state.deleted_todos, 1, todo)
-            table.remove(state.todos, idx)
+            table.insert(state.deleted_todos, 1, vim.deepcopy(state.todos[idx]))
         end
-
-        while #state.deleted_todos > state.MAX_UNDO_HISTORY do
-            table.remove(state.deleted_todos)
-        end
-
-        if #dupes > 0 then
-            state.save_todos()
-        end
-
-        return #dupes
+        state.deleted_todos[state.MAX_UNDO_HISTORY + 1] = nil
+        return ops.call("dedupe_todos", { list = state.todo_lists.active, dry_run = false }) and #dupes or 0
     end
-    
+
     return M
 end
 

@@ -14,7 +14,7 @@ function M.setup(parent_module)
     M.deleted_todos = {} -- history of deleted todos for undo
     M.MAX_UNDO_HISTORY = 100
     M.reordering_todo_index = nil -- currently reordering todo index
-    
+
     -- Get parent module config
     local config
     if parent_module and parent_module.config then
@@ -22,7 +22,7 @@ function M.setup(parent_module)
     else
         config = require("doit.modules.todos.config").options
     end
-    
+
     -- Load sub-modules
     local storage_module = require("doit.modules.todos.state.storage")
     local todos_ops = require("doit.modules.todos.state.todos")
@@ -31,16 +31,20 @@ function M.setup(parent_module)
     local search_ops = require("doit.modules.todos.state.search")
     local sorting_ops = require("doit.modules.todos.state.sorting")
     local tags_ops = require("doit.modules.todos.state.tags")
-    
+
     -- Initialize storage first to get the storage functions
     local storage = storage_module.setup(M)
-    
+    require("doit.modules.todos.state.ops").setup(M)
+    require("doit.modules.todos.state.ops").setup(M)
+    require("doit.modules.todos.state.ops").setup(M)
+    require("doit.modules.todos.state.ops").setup(M)
+
     -- Directly assign storage functions to M
     M.load_from_disk = storage.load_from_disk
     M.save_to_disk = storage.save_to_disk
     M.import_todos = storage.import_todos
     M.export_todos = storage.export_todos
-    
+
     -- Initialize other sub-modules
     todos_ops.setup(M)
     priorities.setup(M)
@@ -48,7 +52,7 @@ function M.setup(parent_module)
     search_ops.setup(M)
     sorting_ops.setup(M)
     tags_ops.setup(M)
-    
+
     -- Forward key functions directly to M
     for _, module in ipairs({todos_ops, priorities, due_dates, search_ops, sorting_ops, tags_ops}) do
         for name, func in pairs(module) do
@@ -57,7 +61,7 @@ function M.setup(parent_module)
             end
         end
     end
-    
+
     -- Forward storage list management functions to M
     M.create_list = storage.create_list
     M.load_list = storage.load_list
@@ -69,7 +73,6 @@ function M.setup(parent_module)
     M.get_list_path = storage.get_list_path
     M.refresh_if_changed = storage.refresh_if_changed
 
-    require("doit.modules.todos.state.twin").setup(M)
     require("doit.modules.todos.state.source").setup(M)
 
     -- List-scoped notes
