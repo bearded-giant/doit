@@ -105,3 +105,19 @@ const textOf = r => r.content[0].text;
 }
 
 console.log("seams: ok");
+
+// memStore seeds lazily from a loader, so a replay only carries the docs an op touched
+{
+    const loaded = [];
+    const store = memStore({ proj: doc([]) }, name => {
+        loaded.push(name);
+        return name === "daily" ? doc([]) : null;
+    });
+    await runTool(ctxFor(store), "add_todo", { list: "proj", text: "owed thing", type: "gate", owe: true });
+    assert.deepEqual(loaded, ["daily"], "the twin list was pulled in on demand");
+    assert.equal(store.docs.get("daily").todos.length, 1);
+    assert.equal(store.getList("nope"), null);
+    assert.deepEqual(store.dirty().sort(), ["daily", "proj"]);
+}
+
+console.log("seams+memStore: ok");
