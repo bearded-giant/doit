@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# owed items live twice (project list + daily twin); a tmux-side change to one
-# side must reach the other the same way packages/core/server.js syncTwin does.
+# owed items live twice (project list + daily twin); every tmux write goes through
+# doitd, whose tools keep the other side in step and report it in a twin line.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_harness.sh"
@@ -9,9 +9,10 @@ source "$SCRIPT_DIR/test_harness.sh"
 SCRIPTS="$SCRIPT_DIR/../../tmux/scripts"
 export DOIT_DATA_DIR="$TEST_TMPDIR/data"
 source "$SCRIPTS/get-active-list.sh"
-source "$SCRIPTS/lib-twin.sh"
+source "$SCRIPTS/lib-call.sh"
 PROJ="$LISTS_DIR/proj.json"
 DAILY="$LISTS_DIR/daily.json"
+start_doitd "$DOIT_DATA_DIR"
 
 reset_fixture() {
     mkdir -p "$LISTS_DIR"
@@ -29,104 +30,19 @@ JSON
 }
 field() { jq -c --arg id "$2" ".todos[] | select(.id == \$id) | $3" "$1"; }
 
-describe "twin_ref"
-
-reset_fixture
-it "returns list and id of the twin"
-assert_eq "daily	D1" "$(twin_ref "$PROJ" P1)"
-it "is empty for an item without a twin"
-assert_eq "" "$(twin_ref "$PROJ" P2)"
-
-describe "twin_apply"
-
-reset_fixture
-it "complete prints a status line"
-assert_eq 'twin in "daily": complete' "$(twin_apply "$(twin_ref "$PROJ" P1)" complete 1700000000)"
-it "complete sets done, clears in_progress, copies completed_at"
-assert_eq '[true,false,1700000000]' "$(field "$DAILY" D1 '[.done, .in_progress, .completed_at]')"
-it "complete bumps the twin list updated_at"
-assert_not_empty "$(jq -r '._metadata.updated_at // empty' "$DAILY")"
-
-twin_apply "daily	D1" complete "" >/dev/null
-it "complete without a source stamp falls back to now"
-assert_eq "true" "$(field "$DAILY" D1 '.completed_at > 1700000000')"
-
-twin_apply "daily	D1" revert >/dev/null
-it "revert clears done and completed_at"
-assert_eq '[false,false,null]' "$(field "$DAILY" D1 '[.done, .in_progress, .completed_at]')"
-
-twin_apply "daily	D1" priority urgent >/dev/null
-it "priority copies the value"
-assert_eq '"urgent"' "$(field "$DAILY" D1 '.priorities')"
-twin_apply "daily	D1" priority "" >/dev/null
-it "priority empty deletes the field"
-assert_eq 'false' "$(field "$DAILY" D1 'has("priorities")')"
-
-twin_apply "daily	D1" due 2026-11-01 >/dev/null
-it "due copies the date"
-assert_eq '"2026-11-01"' "$(field "$DAILY" D1 '.due_date')"
-twin_apply "daily	D1" due "" >/dev/null
-it "due empty deletes the field"
-assert_eq 'false' "$(field "$DAILY" D1 'has("due_date")')"
-
-twin_apply "daily	D1" delete >/dev/null
-it "delete removes the twin from todos"
-assert_eq '0' "$(jq '[.todos[] | select(.id == "D1")] | length' "$DAILY")"
-it "delete puts the twin first in deleted_todos"
-assert_eq '"D1"' "$(jq -c '._metadata.deleted_todos[0].id' "$DAILY")"
-
-it "restore prints a status line"
-assert_eq 'twin in "daily": restore' "$(twin_apply "daily	D1" restore)"
-it "restore puts the twin back in todos with its twin ref"
-assert_eq '{"list":"proj","id":"P1"}' "$(field "$DAILY" D1 '.twin')"
-it "restore drops it from deleted_todos and keeps the rest"
-assert_eq '["OLD"]' "$(jq -c '[._metadata.deleted_todos[].id]' "$DAILY")"
-
-jq '(.todos[] | select(.id == "D1")).description = "from: proj #1 (id P1)\n\nwhy"' "$DAILY" > "$DAILY.tmp" && mv "$DAILY.tmp" "$DAILY"
-twin_apply "daily	D1" relink other >/dev/null
-it "relink points the twin at the new list"
-assert_eq '{"list":"other","id":"P1"}' "$(field "$DAILY" D1 '.twin')"
-it "relink renames the twin's list label and from: line"
-assert_eq '"other: merge it"' "$(field "$DAILY" D1 '.text')"
-assert_eq '"from: other #1 (id P1)\n\nwhy"' "$(field "$DAILY" D1 '.description')"
-twin_apply "daily	D1" relink proj >/dev/null
-it "relink back restores the label"
-assert_eq '"proj: merge it"' "$(field "$DAILY" D1 '.text')"
-
-it "restore of an id not in deleted_todos is a no-op with a message"
-assert_eq 'twin D1 no longer in "daily"' "$(twin_apply "daily	D1" restore)"
-
-it "the reverse direction (daily -> project) works the same"
-twin_apply "$(twin_ref "$DAILY" D1)" complete 42 >/dev/null
-assert_eq '[true,42]' "$(field "$PROJ" P1 '[.done, .completed_at]')"
-
-describe "twin_apply: missing twin"
-
-reset_fixture
-before=$(cat "$DAILY")
-it "twin id missing: message, no file change"
-assert_eq 'twin GONE no longer in "daily"' "$(twin_apply "daily	GONE" complete 1)"
-assert_eq "$before" "$(cat "$DAILY")" "daily.json changed"
-it "twin list missing: message"
-assert_eq 'twin list "nope" is gone' "$(twin_apply "nope	X" complete 1)"
-it "no twin: no output"
-assert_eq "" "$(twin_apply "$(twin_ref "$PROJ" P2)" complete 1)"
-it "unknown op fails"
-twin_apply "daily	D1" bogus >/dev/null
-assert_eq "1" "$?"
-
 describe "todo-interactive.sh update_todo"
 
 # the script runs an fzf loop on load, so pull just the function out of it
 eval "$(sed -n '/^update_todo() {/,/^}/p' "$SCRIPTS/todo-interactive.sh")"
 TODO_LIST_PATH="$PROJ"
+ACTIVE_LIST_NAME=proj
 
 reset_fixture
 update_todo P1 complete
 it "complete syncs the twin with the same completed_at"
 assert_eq "$(field "$PROJ" P1 '.completed_at')" "$(field "$DAILY" D1 '.completed_at')"
 it "complete sets TWIN_MSG"
-assert_eq 'twin in "daily": complete' "$TWIN_MSG"
+assert_eq 'twin in "daily": completed' "$TWIN_MSG"
 
 update_todo P1 revert
 it "revert syncs the twin"

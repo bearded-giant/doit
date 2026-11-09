@@ -5,7 +5,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
 source "$SCRIPT_DIR/lib-footer.sh"
-source "$SCRIPT_DIR/lib-twin.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 source "$SCRIPT_DIR/lib-origin.sh"
 
 DOIT_VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/../../VERSION" 2>/dev/null)"
@@ -458,172 +458,28 @@ input_text() {
     fi
 }
 
-# Function to update todo status
+# status and priority changes go to doitd by id; TWIN_MSG carries the tool's twin line for the status message
 update_todo() {
-    local todo_id="$1"
-    local action="$2"
-    local priority="$3"
-    local ref was_done
-    ref=$(twin_ref "$TODO_LIST_PATH" "$todo_id")
-    was_done=$(jq -r --arg id "$todo_id" '.todos[] | select(.id == $id) | .done' "$TODO_LIST_PATH")
+    local todo_id="$1" action="$2" priority="$3" tool args out
     TWIN_MSG=""
-
+    if [[ "$action" == toggle ]]; then
+        # pending -> in progress -> done -> pending, the s / x / X keys in sequence
+        case "$(jq -r --arg id "$todo_id" '.todos[] | select(.id == $id) | if .done then "done" elif .in_progress then "active" else "pending" end' "$TODO_LIST_PATH")" in
+            done) action=revert ;;
+            active) action=complete ;;
+            *) action=start ;;
+        esac
+    fi
     case "$action" in
-        "toggle")
-            jq --arg id "$todo_id" '
-                (.todos[] | select(.id == $id)) as $t |
-                .todos |= map(
-                    if .id == $id then
-                        if .done then
-                            .done = false | .in_progress = false | del(.completed_at)
-                        elif .in_progress then
-                            .in_progress = false | .done = true | .completed_at = (now | floor)
-                        else
-                            .in_progress = true | .done = false
-                        end
-                    elif ($t.done == false and $t.in_progress != true) then
-                        .in_progress = false
-                    else . end
-                ) |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "start")
-            jq --arg id "$todo_id" '
-                .todos |= map(
-                    if .id == $id then
-                        .in_progress = true |
-                        .done = false
-                    else
-                        .in_progress = false
-                    end
-                ) |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "stop")
-            jq --arg id "$todo_id" '
-                .todos |= map(
-                    if .id == $id then
-                        .in_progress = false
-                    else . end
-                ) |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "complete")
-            jq --arg id "$todo_id" '
-                .todos |= map(
-                    if .id == $id then
-                        .in_progress = false |
-                        .done = true |
-                        .completed_at = (now | floor)
-                    else . end
-                ) |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "revert")
-            jq --arg id "$todo_id" '
-                .todos |= map(
-                    if .id == $id then
-                        .in_progress = false |
-                        .done = false |
-                        del(.completed_at)
-                    else . end
-                ) |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "priority")
-            local new_priority="$priority"
-            if [[ "$new_priority" == "default" ]]; then
-                # remove priority field
-                jq --arg id "$todo_id" '
-                    .todos |= map(
-                        if .id == $id then
-                            del(.priorities)
-                        else . end
-                    ) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            else
-                jq --arg id "$todo_id" --arg priority "$new_priority" '
-                    .todos |= map(
-                        if .id == $id then
-                            .priorities = $priority
-                        else . end
-                    ) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            fi
-            ;;
-        "move_up")
-            # swap order_index with the todo above (lower order_index among non-done items)
-            jq --arg id "$todo_id" '
-                # get current todo order_index
-                (.todos[] | select(.id == $id) | .order_index) as $current_order |
-                # find the todo just above (highest order_index less than current, excluding done)
-                ([.todos[] | select(.done == false and .order_index < $current_order)] | max_by(.order_index)) as $above |
-                if $above then
-                    .todos |= map(
-                        if .id == $id then
-                            .order_index = $above.order_index
-                        elif .id == $above.id then
-                            .order_index = $current_order
-                        else . end
-                    )
-                else . end |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "move_down")
-            # swap order_index with the todo below (higher order_index among non-done items)
-            jq --arg id "$todo_id" '
-                # get current todo order_index
-                (.todos[] | select(.id == $id) | .order_index) as $current_order |
-                # find the todo just below (lowest order_index greater than current, excluding done)
-                ([.todos[] | select(.done == false and .order_index > $current_order)] | min_by(.order_index)) as $below |
-                if $below then
-                    .todos |= map(
-                        if .id == $id then
-                            .order_index = $below.order_index
-                        elif .id == $below.id then
-                            .order_index = $current_order
-                        else . end
-                    )
-                else . end |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
-        "delete")
-            jq --arg id "$todo_id" '
-                .todos |= map(select(.id != $id)) |
-                ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            ;;
+        start)    tool=start_todo;    args='{id: $id, list: $list}' ;;
+        stop)     tool=update_todo;   args='{id: $id, list: $list, in_progress: false}' ;;
+        complete) tool=complete_todo; args='{id: $id, list: $list}' ;;
+        revert)   tool=revert_todo;   args='{id: $id, list: $list}' ;;
+        priority) tool=update_todo;   args='{id: $id, list: $list, priority: $p}' ;;
+        *) return 1 ;;
     esac
-
-    [[ -z "$ref" ]] && return 0
-    local done_now stamp
-    case "$action" in
-        complete|revert|toggle)
-            read -r done_now stamp < <(jq -r --arg id "$todo_id" \
-                '.todos[] | select(.id == $id) | "\(.done) \(.completed_at // "")"' "$TODO_LIST_PATH")
-            # toggle's pending -> in_progress step leaves done alone, and the MCP never syncs in_progress
-            [[ "$action" == toggle && "$done_now" == "$was_done" ]] && return 0
-            if [[ "$done_now" == true ]]; then
-                TWIN_MSG=$(twin_apply "$ref" complete "$stamp")
-            else
-                TWIN_MSG=$(twin_apply "$ref" revert)
-            fi
-            ;;
-        priority)
-            [[ "$priority" == default ]] && priority=""
-            TWIN_MSG=$(twin_apply "$ref" priority "$priority")
-            ;;
-        delete) TWIN_MSG=$(twin_apply "$ref" delete) ;;
-    esac
+    out=$(doit_call "$tool" "$(jq -cn --arg id "$todo_id" --arg list "$ACTIVE_LIST_NAME" --arg p "${priority/default/none}" "$args")" "$ACTIVE_LIST_NAME") || return 1
+    TWIN_MSG=$(doit_twin_msg "$out")
 }
 
 # open a list-scoped note in nvim (title on line 1, body below the marker) so the
@@ -646,10 +502,8 @@ open_note_editor() {
     new_title=$(sed -n '1p' "$tmp")
     new_body=$(tail -n +3 "$tmp")
     rm -f "$tmp"
-    jq --arg id "$note_id" --arg t "$new_title" --arg b "$new_body" '
-        .notes |= map(if .id == $id then .title = $t | .body = $b | .updated_at = (now | floor) else . end) |
-        ._metadata.updated_at = (now | floor)
-    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+    doit_call update_note "$(jq -cn --arg id "$note_id" --arg list "$ACTIVE_LIST_NAME" --arg t "$new_title" --arg b "$new_body" \
+        '{id: $id, list: $list, title: $t, body: $b}')" "$ACTIVE_LIST_NAME" >/dev/null
 }
 
 # Main interactive loop
@@ -724,18 +578,9 @@ while true; do
         CURRENT_DUE=$(jq -r --arg id "$TODO_ID" '.todos[] | select(.id == $id) | .due_date // ""' "$TODO_LIST_PATH")
         NEW_DUE=$(input_text "$CURRENT_DUE" " Due date YYYY-MM-DD  ·  empty clears  ·  [esc] cancel ")
         if [[ $? -ne 130 ]]; then
-            if [[ -z "$NEW_DUE" ]]; then
-                jq --arg id "$TODO_ID" '(.todos[] | select(.id == $id)) |= del(.due_date)' \
-                    "$TODO_LIST_PATH" > "$TODO_LIST_PATH.tmp" && mv "$TODO_LIST_PATH.tmp" "$TODO_LIST_PATH"
-                twin_apply "$(twin_ref "$TODO_LIST_PATH" "$TODO_ID")" due "" >/dev/null
-            elif [[ "$NEW_DUE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-                jq --arg id "$TODO_ID" --arg due "$NEW_DUE" '(.todos[] | select(.id == $id)).due_date = $due' \
-                    "$TODO_LIST_PATH" > "$TODO_LIST_PATH.tmp" && mv "$TODO_LIST_PATH.tmp" "$TODO_LIST_PATH"
-                twin_apply "$(twin_ref "$TODO_LIST_PATH" "$TODO_ID")" due "$NEW_DUE" >/dev/null
-            else
-                echo "Invalid date '$NEW_DUE' - use YYYY-MM-DD" >&2
-                sleep 1
-            fi
+            # the tool validates the date and mirrors it onto an owed twin
+            doit_call update_todo "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" --arg due "$NEW_DUE" \
+                '{id: $id, list: $list, due: $due}')" "$ACTIVE_LIST_NAME" >/dev/null || sleep 1
             CURSOR_TARGET="$TODO_ID"
         fi
         continue
@@ -747,15 +592,8 @@ while true; do
         NEW_SEQ=$(input_text "$CURRENT_SEQ" " Sequence position  ·  empty clears  ·  [esc] cancel ")
         if [[ $? -ne 130 ]]; then
             if [[ "$NEW_SEQ" =~ ^[0-9]*$ ]]; then
-                jq --arg id "$TODO_ID" --argjson pos "${NEW_SEQ:-0}" "$NEST_JQ"'
-                    (.todos | map(select(.id != $id and seqd) | .sequence)) as $taken |
-                    (first(range($pos; infinite) as $n | select($taken | any(. == $n) | not) | $n)) as $free |
-                    .todos |= map(
-                        if .id == $id then (if $pos > 0 then .sequence = $pos else del(.sequence) end)
-                        elif seqd and .sequence >= $pos and .sequence < $free then .sequence += 1
-                        else . end) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "$TODO_LIST_PATH.tmp" && mv "$TODO_LIST_PATH.tmp" "$TODO_LIST_PATH"
+                doit_call update_todo "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" --argjson seq "${NEW_SEQ:-0}" \
+                    '{id: $id, list: $list, sequence: $seq}')" "$ACTIVE_LIST_NAME" >/dev/null || sleep 1
             else
                 echo "Invalid sequence '$NEW_SEQ' - use a whole number" >&2
                 sleep 1
@@ -820,12 +658,10 @@ while true; do
                     -c "normal! ${HEADER_LINES}jG" \
                     -c 'nnoremap <buffer> q :wq<CR>'
 
-                NEW_DESC=$(stamp_description "$(tail -n +$((HEADER_LINES + 1)) "$VIEW_TMP")")
+                NEW_DESC=$(tail -n +$((HEADER_LINES + 1)) "$VIEW_TMP")
                 rm -f "$VIEW_TMP"
-                jq --arg id "$TODO_ID" --arg desc "$NEW_DESC" '
-                    .todos |= map(if .id == $id then .description = $desc else . end) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+                doit_call add_note "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" --arg note "$NEW_DESC" \
+                    '{id: $id, list: $list, note: $note, mode: "replace"}')" "$ACTIVE_LIST_NAME" >/dev/null || sleep 1
             fi
             ;;
         "s")
@@ -866,11 +702,8 @@ while true; do
                     NEW_DESC=$(input_text "$CURRENT_DESC" "Description (enter to save, esc to cancel)")
                     [[ $? -eq 130 ]] && continue
                 fi
-                NEW_DESC=$(stamp_description "$NEW_DESC")
-                jq --arg id "$TODO_ID" --arg desc "$NEW_DESC" '
-                    .todos |= map(if .id == $id then .description = $desc else . end) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+                doit_call add_note "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" --arg note "$NEW_DESC" \
+                    '{id: $id, list: $list, note: $note, mode: "replace"}')" "$ACTIVE_LIST_NAME" >/dev/null || sleep 1
             fi
             ;;
         "P")
@@ -910,11 +743,8 @@ while true; do
                     echo "Keeping original"
                     sleep 0.3
                 elif [[ "$NEW_TEXT" != "$CURRENT_TEXT" ]]; then
-                    jq --arg id "$TODO_ID" --arg text "$NEW_TEXT" '
-                        .todos |= map(if .id == $id then .text = $text else . end) |
-                        ._metadata.updated_at = (now | floor)
-                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                    echo "Updated"
+                    doit_call update_todo "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" --arg text "$NEW_TEXT" \
+                        '{id: $id, list: $list, text: $text}')" "$ACTIVE_LIST_NAME" >/dev/null && echo "Updated"
                     sleep 0.3
                 else
                     echo "No changes"
@@ -930,11 +760,8 @@ while true; do
                 read -n 1 -r CONFIRM
                 echo
                 if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-                    jq --arg id "$NOTE_ID" '
-                        .notes |= map(select(.id != $id)) |
-                        ._metadata.updated_at = (now | floor)
-                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                    echo "Deleted note"
+                    doit_call delete_note "$(jq -cn --arg id "$NOTE_ID" --arg list "$ACTIVE_LIST_NAME" '{id: $id, list: $list}')" "$ACTIVE_LIST_NAME" >/dev/null \
+                        && echo "Deleted note"
                     sleep 0.5
                 fi
                 continue
@@ -949,14 +776,8 @@ while true; do
                     UNDO_TYPE="delete"
                     UNDO_ID="$TODO_ID"
                     UNDO_LABEL="$TODO_TEXT"
-                    UNDO_TWIN=$(twin_ref "$TODO_LIST_PATH" "$TODO_ID")
-                    jq --arg id "$TODO_ID" '
-                        (.todos[] | select(.id == $id)) as $deleted |
-                        .todos |= map(select(.id != $id)) |
-                        ._metadata.deleted_todos = ([$deleted] + (._metadata.deleted_todos // []))[0:10] |
-                        ._metadata.updated_at = (now | floor)
-                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                    TWIN_MSG=$(twin_apply "$UNDO_TWIN" delete)
+                    OUT=$(doit_call delete_todo "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" '{id: $id, list: $list}')" "$ACTIVE_LIST_NAME")
+                    TWIN_MSG=$(doit_twin_msg "$OUT")
                     echo "Deleted (u to undo)${TWIN_MSG:+ · $TWIN_MSG}"
                     sleep 0.5
                 fi
@@ -970,13 +791,8 @@ while true; do
                 read -n 1 -r CONFIRM
                 echo
                 if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-                    jq '
-                        [.todos[] | select(.done == true)] as $deleted |
-                        .todos |= map(select(.done == false)) |
-                        ._metadata.deleted_todos = ($deleted + (._metadata.deleted_todos // []))[0:10] |
-                        ._metadata.updated_at = (now | floor)
-                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                    echo "Deleted $COMPLETED_COUNT completed todos"
+                    doit_call clear_done "$(jq -cn --arg list "$ACTIVE_LIST_NAME" '{list: $list}')" "$ACTIVE_LIST_NAME" >/dev/null \
+                        && echo "Deleted $COMPLETED_COUNT completed todos"
                     sleep 0.5
                 fi
             else
@@ -989,41 +805,20 @@ while true; do
                 echo "Nothing to undo"
                 sleep 0.5
             elif [[ "$UNDO_TYPE" == "delete" ]]; then
-                HAS_DELETED=$(jq -r '._metadata.deleted_todos[0].id // empty' "$TODO_LIST_PATH")
-                if [[ -n "$HAS_DELETED" ]]; then
-                    RESTORED_TEXT=$(jq -r '._metadata.deleted_todos[0].text' "$TODO_LIST_PATH")
-                    jq '
-                        ._metadata.deleted_todos[0] as $restore |
-                        .todos += [$restore] |
-                        ._metadata.deleted_todos = ._metadata.deleted_todos[1:] |
-                        ._metadata.updated_at = (now | floor)
-                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                    TWIN_MSG=$(twin_apply "$UNDO_TWIN" restore)
-                    echo "Restored: $RESTORED_TEXT${TWIN_MSG:+ · $TWIN_MSG}"
+                if OUT=$(doit_call restore_todo "$(jq -cn --arg id "$UNDO_ID" --arg list "$ACTIVE_LIST_NAME" '{id: $id, list: $list}')" "$ACTIVE_LIST_NAME"); then
+                    TWIN_MSG=$(doit_twin_msg "$OUT")
+                    echo "Restored: $UNDO_LABEL${TWIN_MSG:+ · $TWIN_MSG}"
                 fi
                 UNDO_TYPE=""
                 sleep 0.5
             else
-                jq --arg id "$UNDO_ID" --argjson done "$UNDO_PREV_DONE" --argjson ip "$UNDO_PREV_IN_PROGRESS" \
-                    --arg ca "$UNDO_PREV_COMPLETED_AT" '
-                    .todos |= map(
-                        if .id == $id then
-                            .done = $done | .in_progress = $ip |
-                            if $done then .completed_at = (($ca | tonumber?) // .completed_at) else del(.completed_at) end
-                        else . end
-                    ) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                TWIN_MSG=""
-                # start/stop never synced the twin, so undoing them must not either
-                if [[ "$UNDO_TYPE" == complete || "$UNDO_TYPE" == revert ]]; then
-                    UNDO_REF=$(twin_ref "$TODO_LIST_PATH" "$UNDO_ID")
-                    if [[ "$UNDO_PREV_DONE" == true ]]; then
-                        TWIN_MSG=$(twin_apply "$UNDO_REF" complete \
-                            "$(jq -r --arg id "$UNDO_ID" '.todos[] | select(.id == $id) | .completed_at // ""' "$TODO_LIST_PATH")")
-                    else
-                        TWIN_MSG=$(twin_apply "$UNDO_REF" revert)
-                    fi
+                # back to the status the item had; the tool re-stamps completed_at and mirrors the twin
+                if [[ "$UNDO_PREV_DONE" == true ]]; then
+                    update_todo "$UNDO_ID" complete
+                elif [[ "$UNDO_PREV_IN_PROGRESS" == true ]]; then
+                    update_todo "$UNDO_ID" start
+                else
+                    update_todo "$UNDO_ID" revert
                 fi
                 echo "Undid $UNDO_TYPE: $UNDO_LABEL${TWIN_MSG:+ · $TWIN_MSG}"
                 UNDO_TYPE=""
@@ -1094,29 +889,13 @@ while true; do
                         --layout=reverse)
 
                 if [[ -n "$TARGET_LIST" ]]; then
-                    TARGET_PATH="$LISTS_DIR/${TARGET_LIST}.json"
-
-                    # Get the todo object
-                    TODO_OBJ=$(jq --arg id "$TODO_ID" '.todos[] | select(.id == $id)' "$TODO_LIST_PATH")
-
-                    if [[ -n "$TODO_OBJ" ]]; then
-                        # Remove from current list
-                        jq --arg id "$TODO_ID" '
-                            .todos |= map(select(.id != $id)) |
-                            ._metadata.updated_at = (now | floor)
-                        ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-
-                        # Add to target list
-                        jq --argjson todo "$TODO_OBJ" '
-                            .todos += [$todo | del(.sequence)] |
-                            ._metadata.updated_at = (now | floor)
-                        ' "$TARGET_PATH" > "${TARGET_PATH}.tmp" && mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
-
-                        TWIN_MSG=$(twin_apply "$(twin_ref "$TARGET_PATH" "$TODO_ID")" relink "$TARGET_LIST")
-                        TODO_TEXT=$(echo "$TODO_OBJ" | jq -r '.text | split("\n")[0][0:30]')
+                    if OUT=$(doit_call move_todo "$(jq -cn --arg id "$TODO_ID" --arg from "$ACTIVE_LIST_NAME" --arg to "$TARGET_LIST" \
+                            '{id: $id, from_list: $from, to_list: $to}')" "$ACTIVE_LIST_NAME"); then
+                        TWIN_MSG=$(doit_twin_msg "$OUT")
+                        TODO_TEXT=$(sed -n 's/^Moved from "[^"]*" to "[^"]*": //p' <<< "$OUT" | head -1 | cut -c1-30)
                         echo "Moved to $TARGET_LIST: $TODO_TEXT${TWIN_MSG:+ · $TWIN_MSG}"
-                        sleep 0.5
                     fi
+                    sleep 0.5
                 fi
             fi
             ;;
@@ -1240,14 +1019,8 @@ while true; do
                 mv "${DAILY_PATH}.tmp" "$DAILY_PATH"
 
                 # set obsidian_ref (lnum 0 — nvim refresh_buffer_refs derives real value)
-                jq --arg id "$TODO_ID" --arg date "$TODAY" --arg file "$DAILY_PATH" '
-                    .todos |= map(
-                        if .id == $id then
-                            .obsidian_ref = { file: $file, date: $date, lnum: 0 }
-                        else . end
-                    ) |
-                    ._metadata.updated_at = (now | floor)
-                ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+                doit_call update_todo "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" --arg date "$TODAY" --arg file "$DAILY_PATH" \
+                    '{id: $id, list: $list, fields: {obsidian_ref: {file: $file, date: $date, lnum: 0}}}')" "$ACTIVE_LIST_NAME" >/dev/null
 
                 SHORT=$(echo "$TODO_TEXT" | head -1 | cut -c1-40)
                 echo "Sent to daily: $SHORT"
@@ -1292,52 +1065,12 @@ while true; do
             TODO_TEXT="$PASTED"
 
             SELECTED_PRIORITY=$(select_priority "default" "Select Priority (Enter for default)")
+            [[ "$SELECTED_PRIORITY" == default ]] && SELECTED_PRIORITY=""
 
-            TODO_ID="$(date +%s)_$(( RANDOM * RANDOM % 9999999 ))"
-            MAX_ORDER=$(jq '.todos | map(.order_index) | max // 0' "$TODO_LIST_PATH")
-            NEW_ORDER=$((MAX_ORDER + 1))
-
-            if [[ -n "$SELECTED_PRIORITY" && "$SELECTED_PRIORITY" != "default" ]]; then
-                jq --arg id "$TODO_ID" \
-                   --arg text "$TODO_TEXT" \
-                   --arg order "$NEW_ORDER" \
-                   --arg priority "$SELECTED_PRIORITY" \
-                   --arg desc "$(stamp_description "")" \
-                   '.todos += [{
-                      id: $id,
-                      text: $text,
-                      done: false,
-                      in_progress: false,
-                      order_index: ($order | tonumber),
-                      source: "user",
-                      created_at: (now | floor),
-                      description: $desc,
-                      priorities: $priority
-                   }] |
-                   ._metadata.updated_at = (now | floor)' \
-                   "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            else
-                jq --arg id "$TODO_ID" \
-                   --arg text "$TODO_TEXT" \
-                   --arg order "$NEW_ORDER" \
-                   --arg desc "$(stamp_description "")" \
-                   '.todos += [{
-                      id: $id,
-                      text: $text,
-                      done: false,
-                      in_progress: false,
-                      order_index: ($order | tonumber),
-                      source: "user",
-                      created_at: (now | floor),
-                      description: $desc
-                   }] |
-                   ._metadata.updated_at = (now | floor)' \
-                   "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-            fi
-
-            if [[ $? -eq 0 ]]; then
+            if OUT=$(doit_call add_todo "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg text "$TODO_TEXT" --arg p "$SELECTED_PRIORITY" \
+                    '{list: $list, text: $text} + (if $p == "" then {} else {priority: $p} end)')" "$ACTIVE_LIST_NAME"); then
                 # park cursor on the pasted todo when the list redraws
-                CURSOR_TARGET="$TODO_ID"
+                CURSOR_TARGET=$(doit_result_id "$OUT")
                 SHORT=$(echo "$TODO_TEXT" | head -1 | cut -c1-40)
                 echo "✓ Created from clipboard: $SHORT"
                 sleep 0.5
@@ -1359,58 +1092,15 @@ while true; do
                 # Select priority
                 echo ""
                 SELECTED_PRIORITY=$(select_priority "default" "Select Priority (Enter for default)")
+                [[ "$SELECTED_PRIORITY" == default ]] && SELECTED_PRIORITY=""
 
-                # Generate unique ID
-                TODO_ID="$(date +%s)_$(( RANDOM * RANDOM % 9999999 ))"
-
-                # Get the highest order_index
-                MAX_ORDER=$(jq '.todos | map(.order_index) | max // 0' "$TODO_LIST_PATH")
-                NEW_ORDER=$((MAX_ORDER + 1))
-
-                # Add the new todo (with or without priority)
-                if [[ -n "$SELECTED_PRIORITY" && "$SELECTED_PRIORITY" != "default" ]]; then
-                    jq --arg id "$TODO_ID" \
-                       --arg text "$TODO_TEXT" \
-                       --arg order "$NEW_ORDER" \
-                       --arg priority "$SELECTED_PRIORITY" \
-                       --arg desc "$(stamp_description "")" \
-                       '.todos += [{
-                          id: $id,
-                          text: $text,
-                          done: false,
-                          in_progress: false,
-                          order_index: ($order | tonumber),
-                          source: "user",
-                          created_at: (now | floor),
-                          description: $desc,
-                          priorities: $priority
-                       }] |
-                       ._metadata.updated_at = (now | floor)' \
-                       "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                else
-                    jq --arg id "$TODO_ID" \
-                       --arg text "$TODO_TEXT" \
-                       --arg order "$NEW_ORDER" \
-                       --arg desc "$(stamp_description "")" \
-                       '.todos += [{
-                          id: $id,
-                          text: $text,
-                          done: false,
-                          in_progress: false,
-                          order_index: ($order | tonumber),
-                          source: "user",
-                          created_at: (now | floor),
-                          description: $desc
-                       }] |
-                       ._metadata.updated_at = (now | floor)' \
-                       "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                fi
-
-                if [[ $? -eq 0 ]]; then
+                if OUT=$(doit_call add_todo "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg text "$TODO_TEXT" --arg p "$SELECTED_PRIORITY" \
+                        '{list: $list, text: $text} + (if $p == "" then {} else {priority: $p} end)')" "$ACTIVE_LIST_NAME"); then
+                    TODO_ID=$(doit_result_id "$OUT")
                     # park cursor on the new todo when the list redraws
                     CURSOR_TARGET="$TODO_ID"
                     echo ""
-                    if [[ -n "$SELECTED_PRIORITY" && "$SELECTED_PRIORITY" != "default" ]]; then
+                    if [[ -n "$SELECTED_PRIORITY" ]]; then
                         echo "Created [$SELECTED_PRIORITY]: $TODO_TEXT"
                     else
                         echo "Created: $TODO_TEXT"
@@ -1425,17 +1115,7 @@ while true; do
                     echo
 
                     if [[ "$MARK_PROGRESS" =~ ^[Yy]$ ]]; then
-                        jq --arg id "$TODO_ID" '
-                            .todos |= map(
-                                if .id == $id then
-                                    .in_progress = true
-                                else
-                                    .in_progress = false
-                                end
-                            ) |
-                            ._metadata.updated_at = (now | floor)
-                        ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-                        echo "Marked as in-progress"
+                        update_todo "$TODO_ID" start && echo "Marked as in-progress"
                     fi
                 else
                     echo "Error: Failed to create todo"
