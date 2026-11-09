@@ -110,11 +110,11 @@ assert.match(r.stderr, /Unknown command "bogus"/);
 
 // importing server.js must not have changed what the MCP side writes
 const mcp = spawnSync("node", ["-e", `
-    const { server } = await import(${JSON.stringify(path.join(here, "..", "core", "server.js"))});
+    const { createMcpServer, localExecutor } = await import(${JSON.stringify(path.join(here, "..", "core", "server.js"))});
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const [c, s] = InMemoryTransport.createLinkedPair();
-    await server.connect(s);
+    await createMcpServer({ execute: localExecutor() }).connect(s);
     const client = new Client({ name: "t", version: "0" });
     await client.connect(c);
     await client.callTool({ name: "add_todo", arguments: { list: "daily", text: "model work", type: "chore" } });

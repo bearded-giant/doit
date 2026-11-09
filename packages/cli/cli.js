@@ -11,8 +11,8 @@ import {
     confirm as confirmPrompt, editor, input as inputPrompt, search as searchPrompt, select as selectPrompt, Separator,
 } from "@inquirer/prompts";
 import {
-    LISTS_DIR, PRIORITY_LABELS, findListByTodoId, isMineList, loadList, parseDue, readJSON, readVersion,
-    renderDue, server, setItemSource, stripFooter, structureAware,
+    LISTS_DIR, PRIORITY_LABELS, createMcpServer, findListByTodoId, isMineList, loadList, localExecutor, parseDue,
+    readJSON, readVersion, renderDue, stripFooter, structureAware,
 } from "@doit/core/server.js";
 import { isSequenced } from "@doit/core/sequence.js";
 import { parseTodoText } from "@doit/core/todo-text.js";
@@ -116,8 +116,9 @@ const orBack = promise => promise.catch(err => {
     throw err;
 });
 
-// every write goes through the MCP tools, so twin sync, stamps and validation stay in one place
-setItemSource("user");
+// every write goes through the MCP tools, so twin sync, stamps and validation stay in one place;
+// items typed here are the user's, written like nvim/tmux ones (no rank)
+const server = createMcpServer({ execute: localExecutor({ source: "user" }) });
 let client;
 async function call(name, args) {
     if (!client) {
