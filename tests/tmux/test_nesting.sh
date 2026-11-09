@@ -129,4 +129,8 @@ it "a child with no open sibling stays put"
 env -u TMUX DOIT_DATA_DIR="$DATA" bash "$SCRIPTS/todo-move.sh" up "  child a1 [A1]" > /dev/null 2>&1
 assert_eq "2" "$(order_of A1)"
 
+it "moving a row whose item is already gone leaves the list intact"
+env -u TMUX DOIT_DATA_DIR="$DATA" bash "$SCRIPTS/todo-move.sh" up "ghost [GONE]" > /dev/null 2>&1
+assert_eq "10" "$(jq '.todos | length' "$LIST" 2>/dev/null)"
+
 report

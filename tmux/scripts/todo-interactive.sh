@@ -575,7 +575,7 @@ update_todo() {
                     )
                 else . end |
                 ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
             ;;
         "move_down")
             # swap order_index with the todo below (higher order_index among non-done items)
@@ -594,7 +594,7 @@ update_todo() {
                     )
                 else . end |
                 ._metadata.updated_at = (now | floor)
-            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+            ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
             ;;
         "delete")
             jq --arg id "$todo_id" '
@@ -955,7 +955,7 @@ while true; do
                         .todos |= map(select(.id != $id)) |
                         ._metadata.deleted_todos = ([$deleted] + (._metadata.deleted_todos // []))[0:10] |
                         ._metadata.updated_at = (now | floor)
-                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+                    ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
                     TWIN_MSG=$(twin_apply "$UNDO_TWIN" delete)
                     echo "Deleted (u to undo)${TWIN_MSG:+ · $TWIN_MSG}"
                     sleep 0.5

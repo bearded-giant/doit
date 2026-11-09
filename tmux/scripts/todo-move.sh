@@ -50,7 +50,7 @@ if [[ -n "$TODO_ID" && "$TODO_ID" != note_* ]]; then
                     else . end)
             else . end |
             ._metadata.updated_at = (now | floor)
-        " "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+        " "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && [[ -s "${TODO_LIST_PATH}.tmp" ]] && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
     fi
 fi
 
