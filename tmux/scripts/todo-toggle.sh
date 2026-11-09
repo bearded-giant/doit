@@ -4,24 +4,20 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
-source "$SCRIPT_DIR/lib-twin.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 
 TODO_LIST_PATH="$(get_active_list_path)"
+ACTIVE_LIST_NAME="$(get_active_list_name)"
 
-# Check if jq is installed
 if ! command -v jq &> /dev/null; then
     echo "Error: jq is required but not installed"
     exit 1
 fi
 
-# Check if the list file exists
 if [[ ! -f "$TODO_LIST_PATH" ]]; then
     tmux display-message "Error: Todo list not found"
     exit 1
 fi
-
-# Create a backup
-cp "$TODO_LIST_PATH" "${TODO_LIST_PATH}.bak"
 
 # Get the ID of the current in-progress todo
 TODO_ID=$(jq -r '.todos[] | select(.in_progress == true) | .id' "$TODO_LIST_PATH" 2>/dev/null | head -1)
@@ -36,28 +32,15 @@ if [[ -z "$TODO_ID" ]]; then
     fi
 fi
 
-# Toggle the done status and clear in_progress flag
-jq --arg id "$TODO_ID" '
-    .todos |= map(
-        if .id == $id then
-            .done = (if .done then false else true end) |
-            .in_progress = false |
-            if .done then .completed_at = (now | floor) else del(.completed_at) end
-        else . end
-    ) |
-    ._metadata.updated_at = (now | floor)
-' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+read -r WAS_DONE TODO_TEXT < <(jq -r --arg id "$TODO_ID" '.todos[] | select(.id == $id) | "\(.done) \(.text | split("\n")[0])"' "$TODO_LIST_PATH")
+ARGS=$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" '{id: $id, list: $list}')
 
-# Get the text of the toggled todo for feedback
-TODO_TEXT=$(jq -r --arg id "$TODO_ID" '.todos[] | select(.id == $id) | .text' "$TODO_LIST_PATH")
-read -r TODO_STATUS COMPLETED_AT < <(jq -r --arg id "$TODO_ID" \
-    '.todos[] | select(.id == $id) | "\(.done) \(.completed_at // "")"' "$TODO_LIST_PATH")
-TWIN_REF=$(twin_ref "$TODO_LIST_PATH" "$TODO_ID")
-
-if [[ "$TODO_STATUS" == "true" ]]; then
-    TWIN_MSG=$(twin_apply "$TWIN_REF" complete "$COMPLETED_AT")
-    tmux display-message "✓ Completed: $TODO_TEXT${TWIN_MSG:+ · $TWIN_MSG}"
-else
-    TWIN_MSG=$(twin_apply "$TWIN_REF" revert)
+if [[ "$WAS_DONE" == true ]]; then
+    OUT=$(doit_call revert_todo "$ARGS" "$ACTIVE_LIST_NAME" 2>&1) || { tmux display-message "Error: $OUT"; exit 1; }
+    TWIN_MSG=$(doit_twin_msg "$OUT")
     tmux display-message "↻ Reopened: $TODO_TEXT${TWIN_MSG:+ · $TWIN_MSG}"
+else
+    OUT=$(doit_call complete_todo "$ARGS" "$ACTIVE_LIST_NAME" 2>&1) || { tmux display-message "Error: $OUT"; exit 1; }
+    TWIN_MSG=$(doit_twin_msg "$OUT")
+    tmux display-message "✓ Completed: $TODO_TEXT${TWIN_MSG:+ · $TWIN_MSG}"
 fi

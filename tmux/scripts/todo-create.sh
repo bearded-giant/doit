@@ -4,7 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
-source "$SCRIPT_DIR/lib-footer.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 
 TODO_LIST_PATH="$(get_active_list_path)"
 ACTIVE_LIST_NAME="$(get_active_list_name)"
@@ -135,55 +135,13 @@ echo ""
 echo -e "${BLUE}─────────────────────────────────────────────${RESET}"
 SELECTED_PRIORITY=$(select_priority)
 
-# Create backup
-cp "$TODO_LIST_PATH" "${TODO_LIST_PATH}.bak"
+[[ "$SELECTED_PRIORITY" == default ]] && SELECTED_PRIORITY=""
 
-# Generate a unique ID (timestamp + random)
-TODO_ID="${EPOCHSECONDS:-$(date +%s)}_$(( RANDOM * RANDOM % 9999999 ))"
-
-# Get the highest order_index
-MAX_ORDER=$(jq '.todos | map(.order_index) | max // 0' "$TODO_LIST_PATH")
-NEW_ORDER=$((MAX_ORDER + 1))
-
-# Add the new todo to the list (with or without priority)
-if [[ -n "$SELECTED_PRIORITY" && "$SELECTED_PRIORITY" != "default" ]]; then
-    jq --arg id "$TODO_ID" \
-       --arg text "$TODO_TEXT" \
-       --arg order "$NEW_ORDER" \
-       --arg priority "$SELECTED_PRIORITY" \
-       '.todos += [{
-          id: $id,
-          text: $text,
-          done: false,
-          in_progress: false,
-          order_index: ($order | tonumber),
-          source: "user",
-          created_at: (now | floor),
-          priorities: $priority
-       }] |
-       ._metadata.updated_at = (now | floor)' \
-       "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-else
-    jq --arg id "$TODO_ID" \
-       --arg text "$TODO_TEXT" \
-       --arg order "$NEW_ORDER" \
-       '.todos += [{
-          id: $id,
-          text: $text,
-          done: false,
-          in_progress: false,
-          order_index: ($order | tonumber),
-          source: "user",
-          created_at: (now | floor)
-       }] |
-       ._metadata.updated_at = (now | floor)' \
-       "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-fi
-
-# Verify the todo was added
-if [[ $? -eq 0 ]]; then
+if OUT=$(doit_call add_todo "$(jq -cn --arg list "$ACTIVE_LIST_NAME" --arg text "$TODO_TEXT" --arg p "$SELECTED_PRIORITY" \
+        '{list: $list, text: $text} + (if $p == "" then {} else {priority: $p} end)')" "$ACTIVE_LIST_NAME"); then
+    TODO_ID=$(doit_result_id "$OUT")
     echo ""
-    if [[ -n "$SELECTED_PRIORITY" && "$SELECTED_PRIORITY" != "default" ]]; then
+    if [[ -n "$SELECTED_PRIORITY" ]]; then
         echo -e "${GREEN}✓ Todo created successfully!${RESET} [${SELECTED_PRIORITY}]"
     else
         echo -e "${GREEN}✓ Todo created successfully!${RESET}"
@@ -203,25 +161,12 @@ if [[ $? -eq 0 ]]; then
     echo
 
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        # Clear all other in_progress flags and set this one
-        jq --arg id "$TODO_ID" '
-            .todos |= map(
-                if .id == $id then
-                    .in_progress = true
-                else
-                    .in_progress = false
-                end
-            ) |
-            ._metadata.updated_at = (now | floor)
-        ' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
-
-        echo -e "${GREEN}▶ Marked as in-progress${RESET}"
+        doit_call start_todo "$(jq -cn --arg id "$TODO_ID" --arg list "$ACTIVE_LIST_NAME" '{id: $id, list: $list}')" "$ACTIVE_LIST_NAME" >/dev/null \
+            && echo -e "${GREEN}▶ Marked as in-progress${RESET}"
     fi
 else
     echo ""
     echo "Error: Failed to create todo"
-    # Restore backup
-    mv "${TODO_LIST_PATH}.bak" "$TODO_LIST_PATH"
     exit 1
 fi
 

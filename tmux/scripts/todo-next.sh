@@ -5,25 +5,22 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/get-active-list.sh"
 source "$SCRIPT_DIR/lib-origin.sh"
+source "$SCRIPT_DIR/lib-call.sh"
 
 TODO_LIST_PATH="$(get_active_list_path)"
+ACTIVE_LIST_NAME="$(get_active_list_name)"
 
-# Check if jq is installed
 if ! command -v jq &> /dev/null; then
     echo "Error: jq is required but not installed"
     exit 1
 fi
 
-# Check if the list file exists
 if [[ ! -f "$TODO_LIST_PATH" ]]; then
     tmux display-message "Error: Todo list not found"
     exit 1
 fi
 
-# Create a backup
-cp "$TODO_LIST_PATH" "${TODO_LIST_PATH}.bak"
-
-# Clear any existing in_progress flags and start the first pending todo in view order
+# the first pending todo in view order
 NEXT_TODO=$(jq -r "$ORIGIN_JQ"'
     .todos |
     map(select(.done == false and .in_progress != true)) |
@@ -37,18 +34,9 @@ if [[ -z "$NEXT_TODO" ]]; then
     exit 0
 fi
 
-# Update the todo list
-jq --arg next_id "$NEXT_TODO" '
-    .todos |= map(
-        if .id == $next_id then
-            .in_progress = true
-        else
-            .in_progress = false
-        end
-    ) |
-    ._metadata.updated_at = (now | floor)
-' "$TODO_LIST_PATH" > "${TODO_LIST_PATH}.tmp" && mv "${TODO_LIST_PATH}.tmp" "$TODO_LIST_PATH"
+# start_todo stops the item in the same worktree slot, like every other surface
+OUT=$(doit_call start_todo "$(jq -cn --arg id "$NEXT_TODO" --arg list "$ACTIVE_LIST_NAME" '{id: $id, list: $list}')" "$ACTIVE_LIST_NAME" 2>&1) \
+    || { tmux display-message "Error: $OUT"; exit 1; }
 
-# Get the text of the newly in-progress todo
 TODO_TEXT=$(jq -r --arg id "$NEXT_TODO" '.todos[] | select(.id == $id) | .text' "$TODO_LIST_PATH")
 tmux display-message "▶ Started: $TODO_TEXT"
