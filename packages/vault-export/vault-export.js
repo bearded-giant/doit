@@ -302,7 +302,16 @@ ${args.map(a => `        <string>${xml(a)}</string>`).join("\n")}
     } catch {
         // not loaded yet
     }
-    execFileSync("launchctl", ["bootstrap", domain, plist]);
+    for (let attempt = 1; ; attempt++) {
+        try {
+            execFileSync("launchctl", ["bootstrap", domain, plist], { stdio: "pipe" });
+            break;
+        } catch (err) {
+            // bootout returns before launchd has torn the old job down; bootstrap gets EIO until it is gone
+            if (attempt === 5) throw err;
+            execFileSync("sleep", ["1"]);
+        }
+    }
     console.log(`installed ${plist}\nlog: ${log}`);
 }
 
