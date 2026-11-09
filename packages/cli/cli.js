@@ -744,8 +744,9 @@ async function main() {
         }
         case "call": {
             const [tool, raw] = args;
-            if (!tool) throw new Error("Usage: doit call <tool> [json|-]");
+            if (!tool) throw new Error("Usage: doit call <tool> [json|-] [-l active-list]");
             const src = raw === "-" ? fs.readFileSync(0, "utf-8") : raw || "{}";
+            if (o.list) current = o.list;
             return console.log(await call(tool, JSON.parse(src)));
         }
         case "daemon":

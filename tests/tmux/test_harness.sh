@@ -10,7 +10,27 @@ FAILURES=""
 
 # temp dir for test fixtures, cleaned up on exit
 TEST_TMPDIR=$(mktemp -d /tmp/doit-test.XXXXXX)
-trap 'rm -rf "$TEST_TMPDIR"' EXIT
+DOITD_PID=""
+stop_doitd() {
+    [[ -n "$DOITD_PID" ]] && { kill "$DOITD_PID" 2>/dev/null; wait "$DOITD_PID" 2>/dev/null; }
+    DOITD_PID=""
+}
+trap 'stop_doitd; rm -rf "$TEST_TMPDIR"' EXIT
+
+# doitd on a private state dir, serving the test's data dir; every write-path test runs one
+start_doitd() {
+    export DOIT_DATA_DIR="$1" DOIT_STATE_DIR="$TEST_TMPDIR/state" DOIT_SERVER_URL=""
+    mkdir -p "$DOIT_DATA_DIR/lists" "$DOIT_STATE_DIR"
+    node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../packages/daemon/doitd.js" > "$TEST_TMPDIR/doitd.log" 2>&1 &
+    DOITD_PID=$!
+    local i
+    for i in $(seq 1 100); do
+        [[ -S "$DOIT_STATE_DIR/doitd.sock" ]] && return 0
+        sleep 0.05
+    done
+    echo "doitd did not start: $(cat "$TEST_TMPDIR/doitd.log")" >&2
+    return 1
+}
 
 color_green=$'\e[32m'
 color_red=$'\e[31m'
