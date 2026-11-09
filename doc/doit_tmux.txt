@@ -51,14 +51,14 @@ INSTALLATION                                        *doit-tmux-installation*
 Using TPM (recommended):~
 
 Add to your ~/.tmux.conf: >tmux
-    set -g @plugin 'bearded-giant/do-it.nvim'
+    set -g @plugin 'bearded-giant/doit'
 <
 Then press `prefix + I` to install.
 
 Manual Installation:~
 
 Clone the repository and source the plugin: >tmux
-    run-shell /path/to/do-it.nvim/tmux/doit.tmux
+    run-shell /path/to/doit/tmux/doit.tmux
 <
 
 After installation, reload tmux config: >bash

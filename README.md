@@ -23,6 +23,8 @@ Do-It.nvim began as a way to track tasks and keep simple markdown notes per proj
 - **Tmux Add-on** - Optional tmux integration with shared data (see below)
 - **Command Line** - A `doit` command to browse, add, and edit items from any shell (see [Command Line](#command-line))
 - **Window-Linked Lists** - Each tmux window holds its own active list; `daily` stays one popup away
+- **Hosted Sync** - One daemon per machine writes the lists and syncs them through a small server you deploy; offline edits catch up on reconnect (see [Daemon and Hosted Sync](#daemon-and-hosted-sync))
+- **Slack** - A private Slack app for `/doit` commands and quick captures by DM, served by the same server
 
 ## Quick Start
 
@@ -295,7 +297,10 @@ require("lualine").setup({
       { require("doit").lualine.todo_stats },
 
       -- Show active (in-progress) todo
-      { require("doit").lualine.active_todo }
+      { require("doit").lualine.active_todo },
+
+      -- Show sync trouble (offline, queued, conflicts); empty when all is well
+      { require("doit").lualine.sync_badge }
     }
   }
 })
@@ -306,6 +311,7 @@ Available components:
 - `current_list` - Shows current list name and todo count: `📋 work (5)`
 - `todo_stats` - Shows todo statistics: `✓3 ◐1 ○2` (done/in-progress/pending)
 - `active_todo` - Shows the current in-progress todo (if any)
+- `sync_badge` - Shows `offline`, `queued N`, or `conflicts N` when the daemon syncs with a server and something needs you; empty otherwise (see [Daemon and Hosted Sync](#daemon-and-hosted-sync))
 
 ## Tmux Integration (Optional Add-on)
 
@@ -318,6 +324,7 @@ The tmux add-on provides todo management directly from tmux, with status bar int
 - [tmux](https://github.com/tmux/tmux) with [TPM](https://github.com/tmux-plugins/tpm)
 - [fzf](https://github.com/junegunn/fzf) for interactive mode
 - [jq](https://stedolan.github.io/jq/) for JSON parsing
+- [Node.js](https://nodejs.org) 22 or newer for the daemon every write goes through (see [Daemon and Hosted Sync](#daemon-and-hosted-sync))
 
 ### Installation
 
@@ -458,10 +465,12 @@ set -g @bearded_giant_status_modules_right "meetings todo"
 For other themes, use the status script directly:
 
 ```bash
-set -g status-right "#(~/.tmux/plugins/do-it.nvim/tmux/scripts/todo-status.sh #{window_id})"
+set -g status-right "#(~/.tmux/plugins/doit/tmux/scripts/todo-status.sh #{window_id})"
 ```
 
 Passing `#{window_id}` lets the status segment resolve the window's linked list; status commands run without a client context, so the script cannot discover the window on its own. By hand, any tmux target works as the argument, such as `'work:api'`.
+
+When the daemon syncs with a server, the segment ends with `[offline]`, `[queued 3]`, or `[conflicts 1]` while something needs you, and shows nothing extra otherwise.
 
 ### Pane Board
 
@@ -501,7 +510,7 @@ The board runs outside tmux, so you can park it in a terminal split next to the 
     pane:split({
       direction = "Left",
       size = 0.2,
-      args = { "/bin/bash", "-lc", wezterm.home_dir .. "/.tmux/plugins/do-it.nvim/tmux/scripts/todo-board.sh" },
+      args = { "/bin/bash", "-lc", wezterm.home_dir .. "/.tmux/plugins/doit/tmux/scripts/todo-board.sh" },
     })
   end),
 },
@@ -519,32 +528,12 @@ Do-it.nvim includes an MCP server that exposes your todo lists to [Claude Code](
 
 ```bash
 npm install
+claude mcp add --scope user doit -- node /path/to/doit/packages/cli/doit-mcp.js
 ```
 
-Add to your Claude Code `settings.json` under `mcpServers`:
+The MCP process is a thin bridge: it reads the list files and hands every write to the daemon (see [Daemon and Hosted Sync](#daemon-and-hosted-sync)), so a model's edits get the same timestamps, twins, and sync as yours. Start the daemon once per machine with `doit daemon install`.
 
-```json
-{
-  "doit": {
-    "command": "node",
-    "args": ["/path/to/do-it.nvim/packages/cli/doit-mcp.js"]
-  }
-}
-```
-
-If you configured a custom storage path in your do-it.nvim setup (via `modules.todos.storage.save_path`), set `DOIT_DATA_DIR` to match:
-
-```json
-{
-  "doit": {
-    "command": "node",
-    "args": ["/path/to/do-it.nvim/packages/cli/doit-mcp.js"],
-    "env": {
-      "DOIT_DATA_DIR": "/your/custom/data/path"
-    }
-  }
-}
-```
+If you configured a custom storage path in your do-it.nvim setup (via `modules.todos.storage.save_path`), export `DOIT_DATA_DIR` to match before you run `doit daemon install` and the `claude mcp add` above; both record it.
 
 ### Available Tools
 
@@ -638,9 +627,12 @@ Duplicate detection strips that whole wrapper before comparing, so an item you t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DOIT_DATA_DIR` | `~/.local/share/nvim/doit` | Data directory path |
+| `DOIT_STATE_DIR` | `~/.local/state/doit` | The daemon's socket, lock, token, and sync state; never inside the data dir |
+| `DOIT_SERVER_URL` | (unset) | The sync server. Unset, the daemon runs local-only and queues nothing |
+| `DOIT_HOST` | the hostname | Name this machine's edits carry on the server |
 | `DOIT_ACTIVE_LIST` | (unset) | Override active list name. Wins over window links and per-project derivation. The MCP server reads only this, then `daily` |
 
-The MCP server reads and writes the same JSON files used by the Neovim plugin and tmux add-on. Changes sync automatically.
+Every surface reads the same JSON files; every write goes through the daemon, so a change made anywhere shows up everywhere on the next redraw.
 
 ## Command Line
 
@@ -675,6 +667,71 @@ An `<item>` is an id (the one the tmux and nvim item views copy), a `#rank` on t
 Inside a list, typing filters its items, and when nothing matches, Enter adds what you typed as a new item. The list also has its list notes, a done-items toggle, and list actions (make current, rename, clear done, delete). An item's menu covers start, complete, reopen, add note, edit details (your `$EDITOR` on the description), title, priority, due date, type, add subtask, move, and delete.
 
 Nothing prompts when stdin or stdout isn't a terminal, so scripts are safe: a missing argument is an error, and deletes need `-y`.
+
+## Daemon and Hosted Sync
+
+Neovim, tmux, the CLI, and the MCP bridge all write through one process per machine: `doitd`, the daemon in `packages/daemon`. It owns the JSON files under the data dir, applies every edit through the same handlers, and keeps its own state (socket, lock, token, sync queue) under `DOIT_STATE_DIR`, outside the data dir. Surfaces still read the files directly, so nothing gets slower; only writes take the trip through the socket. If the daemon is down and nothing holds its lock, the `doit` command and the bridge apply the write themselves, the same way, so you are never locked out.
+
+```bash
+doit daemon install     # launchd agent on macOS, systemd user unit on Linux; starts at login
+doit daemon status      # running or not, and the sync state
+doit daemon logs
+```
+
+### Hosted sync
+
+With a server configured, the daemon becomes a replica: every edit applies locally first, lands in an outbox, and is pushed in order; every 10 s it pulls what other machines changed and rebuilds the affected lists with your pending edits replayed on top. Offline edits keep working and catch up on reconnect. An edit the server refuses (the item was deleted elsewhere, the list was renamed) becomes a conflict: the list goes back to the server's version right away, and `doit sync conflicts` tells you what was dropped.
+
+The server is `packages/server`: a handful of HTTP functions for Vercel over a Postgres database (Neon through the Vercel Marketplace, or any Postgres via `DATABASE_URL`). One deploy serves every machine you own.
+
+1. Deploy `packages/server` (Root Directory `packages/server` in the Vercel project, Node 22) and attach a database. Set `CRON_SECRET` so only Vercel's scheduler can run the nightly prune.
+2. Mint a token per machine. The first run also creates the tables:
+   ```bash
+   DATABASE_URL='postgres://...' node packages/server/bin/token.js add laptop
+   ```
+   Store the token on that machine, readable by you alone:
+   ```bash
+   umask 077 && printf '%s' '<token>' > ~/.local/state/doit/token
+   ```
+3. On the machine that already holds your lists, seed the server, then turn sync on for the daemon:
+   ```bash
+   doit sync import --server https://<app>.vercel.app
+   DOIT_SERVER_URL=https://<app>.vercel.app doit daemon install && doit daemon start
+   ```
+4. On every other machine, start with an empty data dir and clone:
+   ```bash
+   doit sync clone --server https://<app>.vercel.app
+   DOIT_SERVER_URL=https://<app>.vercel.app doit daemon install && doit daemon start
+   ```
+
+| Command | What it does |
+|---------|--------------|
+| `doit sync status` | Mode (local or sync), online or offline, queued edits, conflicts |
+| `doit sync conflicts` | The edits the server refused, with its reason |
+| `doit sync push`, `doit sync pull` | Sync now instead of waiting for the next cycle |
+| `doit sync import [--server URL]` | Upload this machine's lists to an empty server and start syncing from them |
+| `doit sync clone [--server URL]` | Fill an empty data dir from the server |
+
+The same state shows in the nvim statusline (`sync_badge`), the tmux status segment, and `doit daemon status`. A quiet badge means everything is pushed and pulled.
+
+Turning sync off is one step: unset `DOIT_SERVER_URL` and reinstall the daemon. The files stay complete, so the machine keeps working on its own copy.
+
+### Slack
+
+The server also hosts a single-owner Slack app. Create it from `packages/server/slack-manifest.yaml` (replace `<app>` with your deployment host), then set `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_OWNER_ID` (your Slack user id), and `DOIT_TZ` (an IANA zone for timestamps) on the Vercel project. Every request is checked against the signing secret and refused for anyone but the owner.
+
+`/doit` speaks the CLI's vocabulary and answers only you:
+
+| Command | What it does |
+|---------|--------------|
+| `/doit` | Pending items on `daily` |
+| `/doit ls [list]`, `/doit lists`, `/doit find <text>` | Read lists and search |
+| `/doit add <text> [!\|!!\|!!!] [@list] [due:YYYY-MM-DD]` | Add an item; `!` is important, `!!` urgent, `!!!` critical |
+| `/doit done\|start\|reopen\|rm <item>` | Change status or delete (`rm` asks with a button first) |
+| `/doit mv <item> @list`, `/doit note <item> <text>` | Move, or append a note |
+| `/doit list add\|rename\|rm <name>` | Manage lists |
+
+An `<item>` is a `#rank`, an id, or words from its text; several matches come back as buttons. A plain DM to the app adds an item to `daily` with the same markers and gets a check mark reaction once it is written. Items made from Slack are yours (no rank prefix), like the ones you type in Neovim.
 
 ## Obsidian Vault Export
 
@@ -716,7 +773,7 @@ Tests run per surface: the Node packages under `packages/` use Node's built-in r
 | Surface | Command |
 |---------|---------|
 | Node packages | `npm install && npm test` (one package: `npm test -w packages/core`) |
-| Server | `npm test -w packages/server`, against a local Postgres: `docker run -d --name doit-pg -p 54329:5432 -e POSTGRES_PASSWORD=doit -e POSTGRES_DB=doit postgres:16-alpine` (skips without one) |
+| Server and sync | `npm test -w packages/server -w packages/daemon`, against a local Postgres: `docker run -d --name doit-pg -p 54329:5432 -e POSTGRES_PASSWORD=doit -e POSTGRES_DB=doit postgres:16-alpine` (the database-backed files skip without one) |
 | Neovim plugin | `docker/run-tests.sh` (starts a doitd in the container; the specs write through it) |
 | tmux add-on | `tests/tmux/run-tests.sh` |
 | Help docs | `make check-docs` |

@@ -22,6 +22,7 @@ Table of Contents                                          *doit-contents*
   - Import/Export                                            |doit-import|
   - Project Notes                                              |doit-notes|
   - Tmux Integration                                       |doit-tmux-intro|
+  - Sync Status                                                   |doit-sync|
 3. Colors                                                      |doit-colors|
 4. Roadmap                                                    |doit-roadmap|}
 
@@ -70,7 +71,7 @@ INSTALLATION                                              *doit-installation*
 
 Using Lazy.nvim: >lua
     return {
-        "bearded-giant/do-it.nvim",
+        "bearded-giant/doit",
         config = function()
             require("doit").setup({
                 -- your configuration here
@@ -684,7 +685,7 @@ Features:
 
 Quick Start:~
 Add to ~/.tmux.conf with TPM: >tmux
-    set -g @plugin 'bearded-giant/do-it.nvim'
+    set -g @plugin 'bearded-giant/doit'
 <
 
 Key bindings use prefix + d as the menu key:
@@ -693,6 +694,28 @@ Key bindings use prefix + d as the menu key:
     prefix + d + x     Toggle current todo
 
 For complete tmux documentation, see |doit_tmux.txt| (|doit-tmux-contents|)
+
+SYNC STATUS                                                      *doit-sync*
+
+Every write from Neovim goes through the doit daemon (`doitd`), which owns
+the list files and, when a server is configured, syncs them between
+machines (the README covers setting that up). The plugin shows the
+daemon's state through the `sync_badge` lualine component: >lua
+    { require("doit").lualine.sync_badge }
+<
+The badge is empty while everything is fine. It shows `offline` while the
+server cannot be reached, `queued N` while edits wait to be pushed, and
+`conflicts N` when the server refused edits. A daemon without a server
+shows nothing.
+
+Failure modes:~
+- `doitd` not running: writes fail with a notification naming its socket.
+  Start it with `doit daemon start`; reads keep working meanwhile.
+- Server unreachable: edits apply at once and queue. The badge shows
+  `offline` and `queued N` until the daemon reconnects and pushes.
+- Conflicts: an edit the server refused (the item was deleted elsewhere,
+  the list was renamed) is dropped and the list shows the server's
+  version. `doit sync conflicts` lists what was dropped and why.
 
 ==============================================================================
 4. Roadmap                                                    *doit-roadmap*
