@@ -73,11 +73,17 @@ await reset();
     assert.deepEqual(ev.map(e => e.list).sort(), ["daily", "proj"]);
 }
 
-// a pinned rank that another machine took comes back as rank_remap
+// a pinned rank that another machine took comes back as rank_remap, and the rest of the batch follows it
 {
-    const [r] = await applyOps(pool, [op(5, "add_todo", { list: "proj", text: "from the devbox", type: "chore", _pin: { rank: 2 } })], { host: "devbox" });
+    const [r, dep] = await applyOps(pool, [
+        op(5, "add_todo", { list: "proj", text: "from the devbox", type: "chore", _pin: { rank: 2 } }),
+        op(50, "add_todo", { list: "proj", text: "after it", type: "chore", deps: [2], _pin: { rank: 3 } }),
+    ], { host: "devbox" });
     assert.equal(r.status, "applied");
     assert.deepEqual(r.rank_remap, { proj: { 2: 3 } });
+    assert.equal(dep.status, "applied");
+    const proj = await one("select doc from lists where name = 'proj'");
+    assert.equal(proj.doc.todos.at(-1).text, "[chore] 4. after it (dep on #3)");
 }
 
 // a read replayed as an op touches nothing

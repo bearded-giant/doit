@@ -93,6 +93,7 @@ assert.ok(fs.existsSync(p.socket), "the running daemon kept its socket");
     req.destroy();
     assert.match(chunks.join(""), /event: change\ndata: {"lists":\["daily"\]}/);
 }
+assert.match((await socketRequest(p.socket, "POST", "/sync/push", {})).json.error, /no server/, "sync verbs need a server");
 
 daemon.kill("SIGTERM");
 await daemon.exited;
@@ -115,6 +116,7 @@ await call({ tool: "list_todos", args: {}, active_list: "daily" });
 await call({ tool: "dedupe_todos", args: {}, active_list: "daily" });
 assert.equal(fs.readFileSync(p.outbox, "utf-8").trim().split("\n").length, 1, "reads and dry runs queue nothing");
 assert.equal((await socketRequest(p.socket, "GET", "/state")).json.queue, 1);
+assert.match((await socketRequest(p.socket, "POST", "/sync/import", {})).json.error, /syncing already/, "a syncing daemon refuses import");
 daemon.kill("SIGTERM");
 await daemon.exited;
 

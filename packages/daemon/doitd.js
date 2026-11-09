@@ -3,7 +3,9 @@
 import fs from "fs";
 import http from "http";
 import { TOOLS } from "@doit/core/tools.js";
-import { acquireLock, applyOp, dataDir, ensureStateDir, paths, readLines, readState, stateDir, writeState } from "./local.js";
+import { localView } from "@doit/core/view.js";
+import { acquireLock, applyOp, dataDir, ensureStateDir, paths, readLines, readState, serverUrl, stateDir, writeState } from "./local.js";
+import { clone, createSyncer, importDocs, pull, push, syncConfig } from "./sync.js";
 
 const p = paths(stateDir());
 ensureStateDir(p.state);
@@ -37,21 +39,59 @@ const readBody = req => new Promise((resolve, reject) => {
     req.on("error", reject);
 });
 
+const changed = lists => {
+    notify(lists);
+    writeState(p);
+};
+
+// pulled renames and deletes relink windows here, since no surface sees them happen
+const syncCfg = server => syncConfig({ data: dataDir(), state: stateDir(), server, view: localView(dataDir()) });
+const syncer = serverUrl() ? createSyncer(syncCfg(serverUrl()), { log, onChange: changed }) : null;
+
 // one writer: ops apply strictly in arrival order
 let chain = Promise.resolve();
+function serial(fn) {
+    const run = chain.then(fn);
+    chain = run.then(() => {}, () => {});
+    return run;
+}
 function enqueue(body, data) {
-    const run = chain.then(() => applyOp({ data }, body)).then(
+    return serial(() => applyOp({ data }, body)).then(
         r => {
-            if (r.lists.length) {
-                notify(r.lists);
-                writeState(p);
-            }
+            if (r.lists.length) changed(r.lists);
+            if (r.queued) syncer?.kick();
+            else syncer?.afterCall();
             return r;
         },
         err => ({ ok: false, error: err.message }),
     );
-    chain = run.then(() => {}, () => {});
-    return run;
+}
+
+async function syncRoute(verb, body) {
+    const server = body.server || serverUrl();
+    if (!server) return { ok: false, error: "no server: pass server or set DOIT_SERVER_URL" };
+    const cfg = syncCfg(server);
+    try {
+        if (verb === "push" || verb === "pull") {
+            if (syncer && server === serverUrl()) {
+                const r = await syncer.cycle();
+                return { ok: true, ...(verb === "push" ? r.pushed : r.pulled) };
+            }
+            const r = await (verb === "push" ? push : pull)(cfg);
+            if (r.changed.length) changed(r.changed);
+            return { ok: true, ...r };
+        }
+        if (verb === "import" || verb === "clone") {
+            // both rewrite the sync dir from scratch; a daemon already syncing would race them
+            if (syncer) return { ok: false, error: "doitd is syncing already; import and clone run on a daemon without DOIT_SERVER_URL" };
+            const r = await serial(() => (verb === "import" ? importDocs : clone)(cfg));
+            if (r.changed.length) changed(r.changed);
+            return { ok: true, ...r };
+        }
+        return { ok: false, error: `no sync verb ${verb}` };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -71,6 +111,10 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === "GET" && url.pathname === "/tools") {
             return json(res, 200, TOOLS.map(t => ({ name: t.name, description: t.description, internal: Boolean(t.internal) })));
+        }
+        if (req.method === "POST" && url.pathname.startsWith("/sync/")) {
+            const body = JSON.parse((await readBody(req)) || "{}");
+            return json(res, 200, await syncRoute(url.pathname.slice("/sync/".length), body));
         }
         if (req.method === "GET" && url.pathname === "/state") return json(res, 200, readState(p));
         if (req.method === "GET" && url.pathname === "/conflicts") return json(res, 200, readLines(p.conflicts));
@@ -96,11 +140,12 @@ fs.rmSync(p.socket, { force: true });
 server.listen(p.socket, () => {
     fs.chmodSync(p.socket, 0o600);
     writeState(p, { data_dir: dataDir() });
-    log(`doitd listening on ${p.socket} for ${dataDir()}`);
+    log(`doitd listening on ${p.socket} for ${dataDir()}${syncer ? `, syncing with ${serverUrl()}` : ""}`);
 });
 
 function shutdown(signal) {
     log(`doitd stopping (${signal})`);
+    syncer?.stop();
     server.close();
     for (const res of watchers) res.end();
     fs.rmSync(p.socket, { force: true });

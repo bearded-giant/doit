@@ -54,6 +54,10 @@ Daemon
   doit call <tool> [json|-]     run one tool through doitd (json args, or - for stdin)
   doit daemon install|start|stop|status|logs
   doit sync status|conflicts
+  doit sync push|pull           sync now (doitd does it on its own every 10 s)
+  doit sync import|clone [--server URL]
+                                import: seed an empty server with this machine's lists
+                                clone: fill an empty data dir from the server
 
 <item> is an id, a #rank, or words from its text (quote it when more follows).
 With no <item>, commands that need one let you pick it.
@@ -171,14 +175,29 @@ async function daemonCommand(verb = "status") {
     }
 }
 
-function syncCommand(verb = "status") {
+async function syncCommand(verb = "status", rest = []) {
     const p = paths(stateDir());
     if (verb === "status") return console.log(formatState(readState(p)));
     if (verb === "conflicts") {
         const rows = readLines(p.conflicts);
         return console.log(rows.length ? rows.map(c => `${c.op_id} ${c.tool}: ${c.error}`).join("\n") : "No conflicts.");
     }
-    throw new Error(`Unknown sync command "${verb}". Use status or conflicts.`);
+    if (["push", "pull", "import", "clone"].includes(verb)) {
+        const at = rest.indexOf("--server");
+        const server = at >= 0 ? rest[at + 1] : process.env.DOIT_SERVER_URL;
+        let out;
+        try {
+            // the daemon owns the replica and the sync dir, so it runs these; a cold server can take a while
+            out = (await socketRequest(p.socket, "POST", `/sync/${verb}`, { server }, 120000)).json;
+        } catch (err) {
+            throw new Error(`doitd did not answer on ${p.socket} (${err.message}); start it with doit daemon start`);
+        }
+        if (!out.ok) throw new Error(out.error);
+        const { ok, changed = [], ...fields } = out;
+        const summary = Object.entries(fields).map(([k, v]) => `${k} ${v}`).join(", ");
+        return console.log(`${verb}: ${summary}${changed.length ? `; rewrote ${changed.join(", ")}` : ""}`);
+    }
+    throw new Error(`Unknown sync command "${verb}". Use status, conflicts, push, pull, import or clone.`);
 }
 
 function ask(prompt, config, what) {
@@ -752,7 +771,7 @@ async function main() {
         case "daemon":
             return daemonCommand(args[0]);
         case "sync":
-            return syncCommand(args[0]);
+            return syncCommand(args[0], args.slice(1));
         default:
             throw new Error(`Unknown command "${cmd}". Run doit --help.`);
     }

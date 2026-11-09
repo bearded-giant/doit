@@ -29,6 +29,8 @@ export function paths(state = stateDir()) {
         conflicts: path.join(sync, "conflicts.jsonl"),
         cursor: path.join(sync, "cursor.json"),
         stateFile: path.join(sync, "state.json"),
+        serverDir: path.join(sync, "server"),
+        serverNotesDir: path.join(sync, "server-notes"),
     };
 }
 
@@ -120,6 +122,21 @@ export function appendLine(file, record) {
         fs.fsyncSync(fd);
     } finally {
         fs.closeSync(fd);
+    }
+}
+
+export function writeLines(file, records) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, records.map(r => `${JSON.stringify(r)}\n`).join(""), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+}
+
+export function readJson(file) {
+    try {
+        return JSON.parse(fs.readFileSync(file, "utf-8"));
+    } catch {
+        return null;
     }
 }
 

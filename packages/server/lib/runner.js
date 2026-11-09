@@ -1,4 +1,5 @@
 import { createCtx } from "@doit/core/ctx.js";
+import { remapOps } from "@doit/core/ops.js";
 import { runTool } from "@doit/core/tools.js";
 import { noView } from "@doit/core/view.js";
 import { loadPgStore } from "./pgStore.js";
@@ -6,9 +7,16 @@ import { loadPgStore } from "./pgStore.js";
 // every writer serializes here; single user, so one global lock and no deadlocks
 const LOCK = "select pg_advisory_xact_lock(4242)";
 
+// a remapped rank rewrites the rest of the batch here, the same way doitd rewrites its outbox
 export async function applyOps(pool, ops, { host }) {
     const results = [];
-    for (const op of ops) results.push(await applyOne(pool, op, host));
+    let rest = ops;
+    while (rest.length) {
+        const [op, ...tail] = rest;
+        const r = await applyOne(pool, op, host);
+        results.push(r);
+        rest = r.rank_remap ? remapOps(tail, r.rank_remap) : tail;
+    }
     return results;
 }
 
