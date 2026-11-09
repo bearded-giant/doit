@@ -6,7 +6,11 @@ const PRIORITY_WEIGHT = { critical: 3, urgent: 2, important: 1 };
 // nvim's load-time migrations (lua/doit/modules/todos/state/storage.lua load_list) live here
 // so every surface reads one shape; a doc is written back only when a handler saves it
 export function normalizeDoc(doc) {
-    const todos = doc.todos || (doc.todos = []);
+    // nvim encodes an empty Lua table as [], and properties set on an array are lost on save
+    if (!doc._metadata || typeof doc._metadata !== "object" || Array.isArray(doc._metadata)) doc._metadata = {};
+    if (!Array.isArray(doc.todos)) doc.todos = [];
+    if (doc.notes !== undefined && !Array.isArray(doc.notes)) doc.notes = [];
+    const todos = doc.todos;
     const ids = new Set(todos.map(t => t.id).filter(Boolean));
     todos.forEach((t, i) => {
         for (const k of Object.keys(t)) if (k.startsWith("_")) delete t[k];

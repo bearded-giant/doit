@@ -143,7 +143,7 @@ daemon = startDaemon();
 await waitUp();
 out = cli(["call", "list_todos", "{}"], { DOIT_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "doit-other-")) });
 assert.equal(out.status, 1);
-assert.match(out.stderr, /serves .* this process wants/);
+assert.match(out.stderr, /doitd serves .*, not /);
 
 // the stdio bridge forwards data tools as source mcp with its active list; view tools stay local
 {

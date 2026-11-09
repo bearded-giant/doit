@@ -85,6 +85,8 @@ const textOf = r => r.content[0].text;
     assert.equal(legacy.todos[1].parent_id, undefined);
     assert.equal(legacy.todos[1].depth, 0);
     assert.match(legacy.todos[1].id, /^0_\d{7}$/);
+    const fromNvim = normalizeDoc({ todos: [], _metadata: [], notes: [] });
+    assert.deepEqual(fromNvim._metadata, {}, "an empty Lua table arrives as [] and must become an object");
 }
 
 // fileStore: writes land atomically and dirty() tracks changed files only

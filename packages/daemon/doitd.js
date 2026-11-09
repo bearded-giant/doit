@@ -39,8 +39,8 @@ const readBody = req => new Promise((resolve, reject) => {
 
 // one writer: ops apply strictly in arrival order
 let chain = Promise.resolve();
-function enqueue(body) {
-    const run = chain.then(() => applyOp({}, body)).then(
+function enqueue(body, data) {
+    const run = chain.then(() => applyOp({ data }, body)).then(
         r => {
             if (r.lists.length) {
                 notify(r.lists);
@@ -60,7 +60,13 @@ const server = http.createServer(async (req, res) => {
         if (req.method === "POST" && url.pathname === "/call") {
             const body = JSON.parse((await readBody(req)) || "{}");
             if (!body.tool) return json(res, 400, { ok: false, error: "tool required" });
-            const { resolved, ...out } = await enqueue(body);
+            let data;
+            if (body.data_dir && body.data_dir !== dataDir()) {
+                // one daemon, one replica; DOIT_ANY_DATA_DIR lets a test suite point each case at its own dir
+                if (!process.env.DOIT_ANY_DATA_DIR) return json(res, 200, { ok: false, error: `doitd serves ${dataDir()}, not ${body.data_dir}; set DOIT_STATE_DIR to a state dir of its own` });
+                data = body.data_dir;
+            }
+            const { resolved, ...out } = await enqueue(body, data);
             return json(res, 200, out);
         }
         if (req.method === "GET" && url.pathname === "/tools") {
