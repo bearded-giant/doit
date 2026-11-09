@@ -296,6 +296,29 @@ function getMaxOrder(todos) {
     return Math.max(...todos.map(t => t.order_index || 0));
 }
 
+const takenRanks = todos => new Set((todos || []).map(t => parseTodoText(t.text).rank).filter(n => n !== null));
+
+// a rank pinned at local apply is honored when still free; a clash takes the next free rank
+// and reports the remap so the caller can rewrite the ops queued behind this one
+function takeRank(ctx, listName, todos, pinned, key) {
+    const rank = pinned != null && !takenRanks(todos).has(pinned) ? pinned : nextRank(todos);
+    if (pinned != null && rank !== pinned) ((ctx.resolved.rank_remap ??= {})[listName] ??= {})[pinned] = rank;
+    ctx.resolved[key] = rank;
+    return rank;
+}
+
+function takeRankBase(ctx, listName, todos, pinned, count) {
+    const taken = takenRanks(todos);
+    const free = base => Array.from({ length: count }, (_, i) => base + i).every(r => !taken.has(r));
+    const base = pinned != null && free(pinned) ? pinned : nextRank(todos);
+    if (pinned != null && base !== pinned) {
+        const m = (ctx.resolved.rank_remap ??= {})[listName] ??= {};
+        for (let i = 0; i < count; i++) m[pinned + i] = base + i;
+    }
+    ctx.resolved.rank_base = base;
+    return base;
+}
+
 function fuzzyMatch(todos, query) {
     const words = query.toLowerCase().split(/\s+/);
     return todos.filter(t => {
@@ -644,7 +667,7 @@ export const TOOLS = [
             feature: z.string().optional().describe(SCOPE_HINT.feature),
             owe: z.boolean().optional().describe(`The USER owes this action and nothing else can do it: credentials, a console (vault, DNS, IdP, GCP, beta admin), or outward comms (a decision or question is asked, never owed), actionable now, with work or a security/prod risk waiting on it. Never for resuming a session, merging/reviewing an MR, tagging/deploying after a merge, watching for a future event, or anything the model can run. Writes this item AND a twin in "${OWED_LIST}", cross-linked by id, so the user tracks everything they owe across projects in one list. Completing, reverting, deleting or re-prioritizing either twin through these tools applies to both. Put why / do / links / resume sections in 'description'; both twins get it. Not for 'claude:' items.`),
         },
-        async handler(ctx, { text: todoText, list, type, deps, description, priority, due, parent, start, sequence, owe, worktree, feature }) {
+        async handler(ctx, { text: todoText, list, type, deps, description, priority, due, parent, start, sequence, owe, worktree, feature, _pin }) {
             const { name, data } = openList(ctx, list);
             const id = ctx.newId();
             const parsed = parseTodoText(todoText);
@@ -653,11 +676,12 @@ export const TOOLS = [
                 throw new Error("owe items are the user's work: drop the leading 'claude:'.");
             }
             const owed = twinned ? openList(ctx, OWED_LIST, null) : null;
-            const owedRank = owed ? nextRank(owed.data.todos || []) : null;
-            const rank = nextRank(data.todos || []);
+            const owedRank = owed ? takeRank(ctx, OWED_LIST, owed.data.todos, _pin?.owed_rank, "owed_rank") : null;
+            // items typed by the user carry no rank unless they are owed (the twin names the rank)
+            const rank = twinned || ctx.source === "mcp" ? takeRank(ctx, name, data.todos, _pin?.rank, "rank") : null;
             const composed = twinned
                 ? composeTodoText(`owed in ${OWED_LIST} #${owedRank}: ${parsed.body.trim()}`, { type: type || parsed.type, deps, rank })
-                : composeTodoText(todoText, { type, deps, rank: ctx.source === "mcp" ? rank : null });
+                : composeTodoText(todoText, { type, deps, rank });
             const newTodo = {
                 id,
                 text: composed,
@@ -1206,7 +1230,7 @@ export const TOOLS = [
             from_list: z.string().optional().describe("Source list (default: active list)"),
             to_list: z.string().describe("Target list name to move the item to"),
         },
-        async handler(ctx, { id, query, from_list, to_list }) {
+        async handler(ctx, { id, query, from_list, to_list, _pin }) {
             const source = openListForTodo(ctx, from_list, id, "from_list");
             const result = resolveTodo(ctx, source.data, source.name, { id, query });
 
@@ -1231,7 +1255,7 @@ export const TOOLS = [
             moved.order_index = getMaxOrder(targetData.todos) + 1;
             delete moved.sequence;
             const { rank } = parseTodoText(moved.text);
-            const rankMap = rank === null ? null : new Map([[rank, nextRank(targetData.todos)]]);
+            const rankMap = rank === null ? null : new Map([[rank, takeRank(ctx, to_list, targetData.todos, _pin?.rank, "rank")]]);
             if (rankMap) {
                 const { text: renumbered, dropped } = renumberText(moved.text, rankMap);
                 moved.text = renumbered;
@@ -1266,7 +1290,7 @@ export const TOOLS = [
             worktree: z.string().optional().describe("Stamp this worktree on moved items that have none"),
             feature: z.string().optional().describe("Stamp this feature on moved items that have none"),
         },
-        async handler(ctx, { from, to, worktree, feature }) {
+        async handler(ctx, { from, to, worktree, feature, _pin }) {
             if (from === to) throw new Error("from and to are the same list.");
             if (from === OWED_LIST || to === OWED_LIST) {
                 throw new Error(`"${OWED_LIST}" holds the owed twins; merge project lists only.`);
@@ -1278,9 +1302,9 @@ export const TOOLS = [
             const moved = source.data.todos || [];
             const notes = source.data.notes || [];
 
-            let next = nextRank(target.todos);
             const rankMap = new Map();
             const ranks = new Set(moved.map(t => parseTodoText(t.text).rank).filter(n => n !== null));
+            let next = takeRankBase(ctx, to, target.todos, _pin?.rank_base, ranks.size);
             for (const rank of [...ranks].sort((a, b) => a - b)) rankMap.set(rank, next++);
 
             const orderBase = getMaxOrder(target.todos);
@@ -1509,12 +1533,19 @@ export const TOOLS = [
 
 export const toolByName = name => TOOLS.find(t => t.name === name);
 
+// ranks assigned at local apply, carried on the stored op so the server honors them when free
+const pinSchema = z.object({
+    rank: z.number().int().optional(),
+    owed_rank: z.number().int().optional(),
+    rank_base: z.number().int().optional(),
+}).optional();
+
 // One entry point for every surface: validates against the full schema (internal args included),
 // runs the handler, and reports what the handler resolved so the caller can pin the op.
 export async function runTool(ctx, name, args = {}) {
     const tool = toolByName(name);
     if (!tool) throw new Error(`Unknown tool "${name}"`);
-    const parsed = z.object({ ...tool.schema, ...(tool.internalArgs || {}) }).parse(args);
+    const parsed = z.object({ ...tool.schema, ...(tool.internalArgs || {}), _pin: pinSchema }).parse(args);
     const result = await tool.handler(ctx, parsed);
     if (Object.keys(ctx.resolved).length) result._meta = { ...(result._meta || {}), resolved: ctx.resolved };
     return result;
