@@ -340,6 +340,14 @@ function applyScope(todo, { worktree, feature }, { keep = false } = {}) {
     }
 }
 
+// Mine / Claude classifier; must agree with tmux/scripts/lib-origin.sh and sorting.origin() in nvim
+function origin(t) {
+    if (typeof t.source === "string" && t.source !== "") return t.source === "mcp" ? "claude" : "mine";
+    if (t.twin && typeof t.twin === "object") return "claude";
+    if (/^(claude:|\[[^\][]+\]|\d+[a-z]*\.\s)/.test((t.text || "").replace(/^\s+/, ""))) return "claude";
+    return "mine";
+}
+
 // sessions in different worktrees share one repo list, so each worktree keeps its own active item
 function stopActive(todos, todo) {
     for (const t of todos || []) {
@@ -488,6 +496,8 @@ function resolveParent(ctx, data, listName, parent, todo = null) {
     ctx.resolved.parent = parentTodo.id;
     return parentTodo;
 }
+
+const FIELD_ALLOWLIST = new Set(["estimated_hours", "obsidian_ref", "note_id", "note_summary", "note_updated_at", "parent_id"]);
 
 const listArg = z.string().optional().describe("List name (default: active list)");
 const idArg = z.string().optional().describe("Todo ID.");
@@ -764,11 +774,30 @@ export const TOOLS = [
             worktree: z.string().optional().describe(SCOPE_HINT.worktree + " Empty string clears it."),
             feature: z.string().optional().describe(SCOPE_HINT.feature + " Empty string clears it."),
         },
-        async handler(ctx, { id, list, text: todoText, type, deps, claude, description, priority, done, in_progress, order_index, sequence, due, parent, worktree, feature }) {
+        // surface-owned fields the Claude-facing schema does not expose; null or "" clears one
+        internalArgs: {
+            fields: z.record(z.unknown()).optional(),
+        },
+        async handler(ctx, { id, list, text: todoText, type, deps, claude, description, priority, done, in_progress, order_index, sequence, due, parent, worktree, feature, fields }) {
             const { name, data } = openListForTodo(ctx, list, id);
             const todo = (data.todos || []).find(t => t.id === id);
             if (!todo) throw new Error(`Todo "${id}" not found in list "${name}"`);
             ctx.resolved.id = todo.id;
+
+            for (const [key, val] of Object.entries(fields || {})) {
+                if (!FIELD_ALLOWLIST.has(key)) throw new Error(`Field "${key}" is not writable through update_todo.fields.`);
+                if (val === null || val === "") {
+                    delete todo[key];
+                    if (key === "parent_id") todo.depth = 0;
+                } else {
+                    todo[key] = val;
+                    if (key === "parent_id") {
+                        const parentTodo = resolveParent(ctx, data, name, val, todo);
+                        todo.parent_id = parentTodo.id;
+                        todo.depth = (parentTodo.depth || 0) + 1;
+                    }
+                }
+            }
 
             if (todoText !== undefined || type !== undefined || deps !== undefined || claude !== undefined) {
                 todo.text = composeTodoText(todoText !== undefined ? todoText : todo.text, {
@@ -867,6 +896,38 @@ export const TOOLS = [
                 return `${i + 1}) ${t.text}${status}`;
             });
             return text(`Sequenced "${name}":\n${lines.join("\n")}`);
+        },
+    },
+    {
+        name: "reorder_todo",
+        description: "Move a todo one step up or down inside its section, the way the nvim and tmux K/J keys do. A sequenced item swaps `sequence` with the nearest sequenced sibling (across priorities); any other item swaps `order_index` with the nearest sibling of the same in_progress state and priority. Siblings share the parent and the Mine/Claude block, so subtrees move whole and never cross the block boundary.",
+        schema: {
+            id: z.string().describe("Todo ID"),
+            direction: z.enum(["up", "down"]).describe("'up' moves toward the top of its section, 'down' toward the bottom"),
+            list: listArg,
+        },
+        async handler(ctx, { id, direction, list }) {
+            const { name, data } = openListForTodo(ctx, list, id);
+            const me = (data.todos || []).find(t => t.id === id);
+            if (!me) throw new Error(`Todo "${id}" not found in list "${name}"`);
+            ctx.resolved.id = me.id;
+            const seq = isSequenced(me);
+            const field = seq ? "sequence" : "order_index";
+            const cur = me[field] || 0;
+            const sibling = t => t !== me && t.done === false
+                && (t.parent_id || "") === (me.parent_id || "")
+                && isSequenced(t) === seq
+                && origin(t) === origin(me)
+                && (seq || ((t.in_progress || false) === (me.in_progress || false) && (t.priorities || "") === (me.priorities || "")));
+            const beyond = t => (direction === "up" ? (t[field] || 0) < cur : (t[field] || 0) > cur);
+            const nearest = (a, b) => (direction === "up" ? (b[field] || 0) > (a[field] || 0) : (b[field] || 0) < (a[field] || 0)) ? b : a;
+            const candidates = data.todos.filter(t => sibling(t) && beyond(t));
+            if (!candidates.length) return text(`Nothing ${direction === "up" ? "above" : "below"} "${me.text}" in its section.`);
+            const swap = candidates.reduce(nearest);
+            me[field] = swap[field];
+            swap[field] = cur;
+            save(ctx, name, data);
+            return text(`Moved ${direction} in "${name}": ${me.text} (${field} ${swap[field]} -> ${me[field]})`);
         },
     },
     {
@@ -1010,6 +1071,43 @@ export const TOOLS = [
             });
 
             return text(`Deleted from "${name}": ${removed.text}${twinNote}`);
+        },
+    },
+    {
+        name: "restore_todo",
+        internal: true,
+        description: "Undo a delete: move a todo back from _metadata.deleted_todos by id, with its owed twin when that was deleted too.",
+        schema: {
+            id: z.string().describe("Id of the deleted todo"),
+            list: listArg,
+        },
+        async handler(ctx, { id, list }) {
+            const { name, data } = openList(ctx, list);
+            const restore = (doc, todoId) => {
+                const deleted = doc._metadata?.deleted_todos || [];
+                const idx = deleted.findIndex(t => t.id === todoId);
+                if (idx < 0) return null;
+                const [t] = deleted.splice(idx, 1);
+                if (t.parent_id && !doc.todos.some(p => p.id === t.parent_id)) {
+                    delete t.parent_id;
+                    t.depth = 0;
+                }
+                doc.todos.push(t);
+                return t;
+            };
+            const todo = restore(data, id);
+            if (!todo) throw new Error(`No deleted todo "${id}" on "${name}".`);
+            ctx.resolved.id = todo.id;
+            save(ctx, name, data);
+            let twinNote = "";
+            if (todo.twin) {
+                const twinDoc = ctx.store.getList(todo.twin.list);
+                if (twinDoc && restore(twinDoc, todo.twin.id)) {
+                    save(ctx, todo.twin.list, twinDoc);
+                    twinNote = `\nTwin in "${todo.twin.list}" restored.`;
+                }
+            }
+            return text(`Restored in "${name}": ${todo.text}${twinNote}`);
         },
     },
     {
@@ -1217,6 +1315,20 @@ export const TOOLS = [
             save(ctx, name, data);
 
             return text(`Deleted note from "${name}": ${removed.title}`);
+        },
+    },
+
+    {
+        name: "put_scope_notes",
+        internal: true,
+        description: "Replace a whole notes doc of the nvim notes module (notes/<scope>.json: 'global' or 'project-<hash>').",
+        schema: {
+            scope: z.string().regex(/^[\w-]+$/, "Scope names use letters, digits, '_' and '-' only.").describe("Notes scope: 'global' or 'project-<hash>'"),
+            notes: z.array(z.record(z.unknown())).describe("The full notes array for the scope"),
+        },
+        async handler(ctx, { scope, notes }) {
+            ctx.store.putNotes(scope, notes);
+            return text(`Saved ${notes.length} note(s) to notes/${scope}.json`);
         },
     },
 
@@ -1454,11 +1566,14 @@ export const TOOLS = [
         description: "Create a new empty do-it todo list.",
         schema: {
             name: listNameSchema.describe("List name (used as filename, no spaces — use hyphens, max 24 chars)"),
+            source: z.enum(["user", "mcp"]).optional().describe("Whose list it is: 'user' shows it as mine in the views. Omit for Claude's (the default)."),
         },
-        async handler(ctx, { name }) {
+        async handler(ctx, { name, source }) {
             if (ctx.store.getList(name)) throw new Error(`List "${name}" already exists.`);
             const now = ctx.clock.now();
-            ctx.store.putList(name, { todos: [], _metadata: { created_at: now, updated_at: now } });
+            const _metadata = { created_at: now, updated_at: now };
+            if (source) _metadata.source = source;
+            ctx.store.putList(name, { todos: [], _metadata });
             return text(`Created list "${name}" at ${ctx.store.pathOf(name)}`);
         },
     },
