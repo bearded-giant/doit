@@ -90,6 +90,7 @@ const OPTIONS = {
     mine: { type: "boolean" },
     claude: { type: "boolean" },
     yes: { type: "boolean", short: "y" },
+    server: { type: "string" },
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
 };
@@ -175,7 +176,7 @@ async function daemonCommand(verb = "status") {
     }
 }
 
-async function syncCommand(verb = "status", rest = []) {
+async function syncCommand(verb = "status", o = {}) {
     const p = paths(stateDir());
     if (verb === "status") return console.log(formatState(readState(p)));
     if (verb === "conflicts") {
@@ -183,8 +184,7 @@ async function syncCommand(verb = "status", rest = []) {
         return console.log(rows.length ? rows.map(c => `${c.op_id} ${c.tool}: ${c.error}`).join("\n") : "No conflicts.");
     }
     if (["push", "pull", "import", "clone"].includes(verb)) {
-        const at = rest.indexOf("--server");
-        const server = at >= 0 ? rest[at + 1] : process.env.DOIT_SERVER_URL;
+        const server = o.server || process.env.DOIT_SERVER_URL;
         let out;
         try {
             // the daemon owns the replica and the sync dir, so it runs these; a cold server can take a while
@@ -771,7 +771,7 @@ async function main() {
         case "daemon":
             return daemonCommand(args[0]);
         case "sync":
-            return syncCommand(args[0], args.slice(1));
+            return syncCommand(args[0], o);
         default:
             throw new Error(`Unknown command "${cmd}". Run doit --help.`);
     }

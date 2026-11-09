@@ -125,6 +125,15 @@ const modelItem = byText("daily", "model work");
 assert.match(modelItem.text, /^\[chore\] \d+\. model work$/);
 assert.equal(modelItem.source, "mcp");
 
+// sync verbs take --server and need a running daemon
+{
+    const r = run(["sync", "import", "--server", "http://127.0.0.1:1"]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /doitd did not answer/);
+    assert.doesNotMatch(r.stderr, /Unknown option/);
+    assert.match(run(["sync", "push"]).stderr, /doitd did not answer/);
+}
+
 fs.rmSync(dataDir, { recursive: true, force: true });
 fs.rmSync(stateDir, { recursive: true, force: true });
 console.log("cli: ok");
