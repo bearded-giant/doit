@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@doit/core": "*",
+    "@doit/daemon": "*",
     "@inquirer/prompts": "^8.7.4",
     "@modelcontextprotocol/sdk": "^1.12.1"
   }

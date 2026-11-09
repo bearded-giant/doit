@@ -5,17 +5,19 @@ import path from "path";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { parseArgs, styleText } from "util";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
     confirm as confirmPrompt, editor, input as inputPrompt, search as searchPrompt, select as selectPrompt, Separator,
 } from "@inquirer/prompts";
 import {
-    LISTS_DIR, PRIORITY_LABELS, createMcpServer, findListByTodoId, isMineList, loadList, localExecutor, parseDue,
-    readJSON, readVersion, renderDue, stripFooter, structureAware,
+    DATA_DIR, LISTS_DIR, PRIORITY_LABELS, findListByTodoId, isMineList, loadList, localExecutor, parseDue, readJSON,
+    readVersion, renderDue, stripFooter, structureAware,
 } from "@doit/core/server.js";
 import { isSequenced } from "@doit/core/sequence.js";
 import { parseTodoText } from "@doit/core/todo-text.js";
+import { applyViewEffect, localView } from "@doit/core/view.js";
+import { lockHolder, paths, readLines, readState, stateDir } from "@doit/daemon/local.js";
+import { installService, serviceStatus, startService, stopService, tailLogs } from "@doit/daemon/service.js";
+import { doitCall, socketRequest } from "./client.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -47,6 +49,11 @@ Items
   doit start|done|reopen <item> change status
   doit mv <item> [list]         move to another list
   doit rm <item>                delete
+
+Daemon
+  doit call <tool> [json|-]     run one tool through doitd (json args, or - for stdin)
+  doit daemon install|start|stop|status|logs
+  doit sync status|conflicts
 
 <item> is an id, a #rank, or words from its text (quote it when more follows).
 With no <item>, commands that need one let you pick it.
@@ -117,20 +124,61 @@ const orBack = promise => promise.catch(err => {
 });
 
 // every write goes through the MCP tools, so twin sync, stamps and validation stay in one place;
-// items typed here are the user's, written like nvim/tmux ones (no rank)
-const server = createMcpServer({ execute: localExecutor({ source: "user" }) });
-let client;
+// items typed here are the user's, written like nvim/tmux ones (no rank). Data tools reach doitd over
+// its socket (in-process under its lock when it is down); view-only tools run in this process.
+const VIEW_TOOLS = new Set(["switch_list", "set_source_filter"]);
+let local;
 async function call(name, args) {
-    if (!client) {
-        const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-        await server.connect(serverSide);
-        client = new Client({ name: "doit-cli", version: readVersion() });
-        await client.connect(clientSide);
+    if (VIEW_TOOLS.has(name)) {
+        local ||= localExecutor({ source: "user", activeList: currentList() });
+        return (await local(name, args)).content.map(c => c.text).join("\n");
     }
-    const res = await client.callTool({ name, arguments: args });
-    const text = (res.content || []).map(c => c.text).join("\n");
-    if (res.isError) throw new Error(text);
-    return text;
+    const res = await doitCall({ tool: name, args, source: "user", active_list: currentList() });
+    if (!res.ok) throw new Error(res.error);
+    applyViewEffect(localView(DATA_DIR), name, args);
+    return res.text;
+}
+
+const formatState = s => `mode: ${s.mode}${s.mode === "sync" ? `, ${s.online ? "online" : "offline"}` : ""}; queued ${s.queue}; conflicts ${s.conflicts}${s.error ? `; error: ${s.error}` : ""}`;
+
+async function daemonCommand(verb = "status") {
+    const p = paths(stateDir());
+    switch (verb) {
+        case "install":
+            return success(installService());
+        case "start":
+            return success(startService());
+        case "stop":
+            return success(stopService());
+        case "logs":
+            return process.stdout.write(tailLogs());
+        case "status": {
+            const holder = lockHolder(p.lock);
+            let state = null;
+            try {
+                state = (await socketRequest(p.socket, "GET", "/state")).json;
+            } catch {
+                // not answering
+            }
+            console.log(holder
+                ? `doitd running (pid ${holder.pid}); socket ${state ? "answers" : "does not answer"}: ${p.socket}`
+                : `doitd not running (${p.lock} is free)`);
+            if (state) console.log(formatState(state));
+            return console.log(serviceStatus());
+        }
+        default:
+            throw new Error(`Unknown daemon command "${verb}". Use install, start, stop, status or logs.`);
+    }
+}
+
+function syncCommand(verb = "status") {
+    const p = paths(stateDir());
+    if (verb === "status") return console.log(formatState(readState(p)));
+    if (verb === "conflicts") {
+        const rows = readLines(p.conflicts);
+        return console.log(rows.length ? rows.map(c => `${c.op_id} ${c.tool}: ${c.error}`).join("\n") : "No conflicts.");
+    }
+    throw new Error(`Unknown sync command "${verb}". Use status or conflicts.`);
 }
 
 function ask(prompt, config, what) {
@@ -694,6 +742,16 @@ async function main() {
             if (!o.yes && !(await ask(confirm, { message, default: false }, "--yes"))) return;
             return success(await call("delete_todo", { id: todo.id }));
         }
+        case "call": {
+            const [tool, raw] = args;
+            if (!tool) throw new Error("Usage: doit call <tool> [json|-]");
+            const src = raw === "-" ? fs.readFileSync(0, "utf-8") : raw || "{}";
+            return console.log(await call(tool, JSON.parse(src)));
+        }
+        case "daemon":
+            return daemonCommand(args[0]);
+        case "sync":
+            return syncCommand(args[0]);
         default:
             throw new Error(`Unknown command "${cmd}". Run doit --help.`);
     }

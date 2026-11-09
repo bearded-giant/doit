@@ -10,12 +10,13 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(here, "cli.js");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "doit-cli-"));
+const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "doit-cli-state-"));
 const listsDir = path.join(dataDir, "lists");
 fs.mkdirSync(listsDir);
 fs.writeFileSync(path.join(dataDir, "session.json"), JSON.stringify({ active_list: "proj" }));
 fs.writeFileSync(path.join(listsDir, "daily.json"), JSON.stringify({ todos: [], _metadata: {} }));
 
-const env = { ...process.env, DOIT_DATA_DIR: dataDir, DOIT_ACTIVE_LIST: "", DOIT_PINNED_LIST: "", TMUX: "", TMUX_PANE: "" };
+const env = { ...process.env, DOIT_DATA_DIR: dataDir, DOIT_STATE_DIR: stateDir, DOIT_SERVER_URL: "", DOIT_ACTIVE_LIST: "", DOIT_PINNED_LIST: "", TMUX: "", TMUX_PANE: "" };
 const run = (args, input = "") => spawnSync("node", [cli, ...args], { env, input, encoding: "utf-8" });
 const ok = args => {
     const r = run(args);
@@ -125,4 +126,5 @@ assert.match(modelItem.text, /^\[chore\] \d+\. model work$/);
 assert.equal(modelItem.source, "mcp");
 
 fs.rmSync(dataDir, { recursive: true, force: true });
+fs.rmSync(stateDir, { recursive: true, force: true });
 console.log("cli: ok");

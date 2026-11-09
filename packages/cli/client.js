@@ -1,0 +1,51 @@
+import http from "http";
+import { localTz } from "@doit/core/ctx.js";
+import { acquireLock, applyOp, dataDir, lockHolder, paths, readState, stateDir } from "@doit/daemon/local.js";
+
+export function socketRequest(socketPath, method, pathname, body, timeoutMs = 2000) {
+    return new Promise((resolve, reject) => {
+        const req = http.request({ socketPath, method, path: pathname, headers: { "content-type": "application/json" }, timeout: timeoutMs }, res => {
+            let data = "";
+            res.setEncoding("utf-8");
+            res.on("data", chunk => { data += chunk; });
+            res.on("end", () => {
+                try {
+                    resolve({ status: res.statusCode, json: JSON.parse(data || "null") });
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        });
+        req.on("timeout", () => req.destroy(new Error(`no answer within ${timeoutMs} ms`)));
+        req.on("error", reject);
+        req.end(body === undefined ? undefined : JSON.stringify(body));
+    });
+}
+
+// doitd answers: its result. Socket dead and the lock free: apply here under the lock, same code,
+// same outbox. Lock held by a live daemon that does not answer: an error, never a second writer.
+export async function doitCall({ tool, args = {}, source = "user", active_list, active_list_note, tz = localTz() }, { state = stateDir(), timeoutMs = 2000 } = {}) {
+    const p = paths(state);
+    const body = { tool, args, source, active_list, active_list_note, tz };
+    // a daemon serves one replica; a process pointed at another data dir must not write through it
+    const served = readState(p).data_dir;
+    if (served && served !== dataDir()) {
+        throw new Error(`doitd in ${state} serves ${served}, this process wants ${dataDir()}; set DOIT_STATE_DIR to a state dir of its own.`);
+    }
+    try {
+        return (await socketRequest(p.socket, "POST", "/call", body, timeoutMs)).json;
+    } catch (err) {
+        const holder = lockHolder(p.lock);
+        if (holder) {
+            throw new Error(`doitd (pid ${holder.pid}) holds ${p.lock} but ${p.socket} did not answer (${err.message}). Stop or restart the daemon: doit daemon status.`);
+        }
+        const release = acquireLock(p.lock);
+        try {
+            return await applyOp({ state }, body);
+        } catch (applyErr) {
+            return { ok: false, error: applyErr.message };
+        } finally {
+            release();
+        }
+    }
+}
