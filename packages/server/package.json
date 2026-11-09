@@ -1,0 +1,22 @@
+{
+  "name": "@doit/server",
+  "version": "2.0.13",
+  "description": "doit authority on Vercel: ops, sync, Slack",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "bin": {
+    "doit-server-token": "bin/token.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "dev": "node dev.js"
+  },
+  "dependencies": {
+    "@doit/core": "*",
+    "@neondatabase/serverless": "^1.0.0",
+    "pg": "^8.13.0"
+  }
+}
