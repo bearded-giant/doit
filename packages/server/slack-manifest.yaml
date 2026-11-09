@@ -1,0 +1,42 @@
+# Slack app manifest for the doit server. Replace <app> with the deployed host.
+display_information:
+  name: doit
+  description: Personal doit lists in Slack
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: doit
+    always_online: false
+  slash_commands:
+    - command: /doit
+      url: https://<app>/api/slack/commands
+      description: Read and edit doit lists
+      usage_hint: "[add|done|start|ls|find|lists] ..."
+      should_escape: false
+  shortcuts:
+    - name: Save to doit
+      type: message
+      callback_id: save_to_doit
+      description: Add this message as a todo
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - im:history
+      - reactions:write
+settings:
+  event_subscriptions:
+    request_url: https://<app>/api/slack/events
+    bot_events:
+      - app_home_opened
+      - message.im
+  interactivity:
+    is_enabled: true
+    request_url: https://<app>/api/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

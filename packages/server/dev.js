@@ -9,14 +9,33 @@ import changes from "./api/sync/changes.js";
 import importDocs from "./api/sync/import.js";
 import health from "./api/health.js";
 import prune from "./api/cron/prune.js";
+import * as slackCommands from "./api/slack/commands.js";
+import * as slackEvents from "./api/slack/events.js";
+import * as slackInteractions from "./api/slack/interactions.js";
 
+// a function is a (req, res) handler; a module is a web handler with method exports
 const ROUTES = {
     "/api/ops": ops,
     "/api/sync/changes": changes,
     "/api/sync/import": importDocs,
     "/api/health": health,
     "/api/cron/prune": prune,
+    "/api/slack/commands": slackCommands,
+    "/api/slack/events": slackEvents,
+    "/api/slack/interactions": slackInteractions,
 };
+
+async function webHandler(mod, req, res, raw) {
+    const fn = mod[req.method];
+    if (!fn) return res.status(405).json({ error: `use ${Object.keys(mod).join(", ")}` });
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) if (/^(content-type|authorization|x-slack-)/.test(k)) headers.set(k, String(v));
+    const request = new Request(`http://localhost${req.url}`, { method: req.method, headers, body: ["GET", "HEAD"].includes(req.method) ? undefined : raw });
+    const response = await fn(request);
+    res.statusCode = response.status;
+    response.headers.forEach((v, k) => res.setHeader(k, v));
+    res.end(Buffer.from(await response.arrayBuffer()));
+}
 
 export function createServer(routes = ROUTES) {
     return http.createServer(async (req, res) => {
@@ -34,6 +53,7 @@ export function createServer(routes = ROUTES) {
         req.query = Object.fromEntries(url.searchParams);
         let raw = "";
         for await (const chunk of req) raw += chunk;
+        if (typeof handler !== "function") return webHandler(handler, req, res, raw);
         try {
             req.body = raw ? JSON.parse(raw) : {};
         } catch {

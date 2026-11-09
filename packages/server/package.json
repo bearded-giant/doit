@@ -11,12 +11,13 @@
     "doit-server-token": "bin/token.js"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "dev": "node dev.js"
   },
   "dependencies": {
     "@doit/core": "*",
     "@neondatabase/serverless": "^1.0.0",
+    "@vercel/functions": "^3.11.1",
     "pg": "^8.13.0"
   }
 }

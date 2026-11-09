@@ -25,10 +25,10 @@ async function applyOne(pool, op, host) {
     try {
         await client.query("begin");
         await client.query(LOCK);
-        const seen = await client.query("select 1 from applied_ops where op_id = $1", [op.op_id]);
+        const seen = await client.query("select result from applied_ops where op_id = $1", [op.op_id]);
         if (seen.rowCount) {
             await client.query("rollback");
-            return { op_id: op.op_id, status: "duplicate" };
+            return { op_id: op.op_id, status: "duplicate", text: seen.rows[0].result?.text };
         }
         const store = await loadPgStore(client);
         const ctx = createCtx({
@@ -56,7 +56,7 @@ async function applyOne(pool, op, host) {
             );
         }
         await client.query("commit");
-        const out = { op_id: op.op_id, status: "applied", change_seq: changeSeq };
+        const out = { op_id: op.op_id, status: "applied", change_seq: changeSeq, text };
         if (ctx.resolved.rank_remap) out.rank_remap = ctx.resolved.rank_remap;
         return out;
     } catch (err) {
