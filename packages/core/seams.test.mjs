@@ -101,6 +101,8 @@ const textOf = r => r.content[0].text;
     assert.deepEqual(store.dirty(), ["proj"]);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "lists", "proj.json"), "utf-8")).todos[0].in_progress, true);
     assert.ok(!fs.readdirSync(path.join(dir, "lists")).some(f => f.endsWith(".tmp")));
+    await assert.rejects(runTool(ctxFor(store), "list_todos", { list: "../escape" }), /Bad list name/);
+    await assert.rejects(runTool(ctxFor(store), "complete_todo", { list: "a/b", id: "a" }), /Bad list name/);
     await runTool(ctxFor(store), "rename_list", { old_name: "proj", new_name: "proj2" });
     assert.ok(fs.existsSync(path.join(dir, "lists", "proj2.json")));
     fs.rmSync(dir, { recursive: true, force: true });

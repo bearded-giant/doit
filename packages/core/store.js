@@ -39,6 +39,13 @@ export function normalizeDoc(doc) {
 
 const bytesOf = doc => JSON.stringify(doc, null, 2);
 
+// the name is the file name; same charset as create_list and tmux sanitize_list_name, so no path escapes lists/
+const LIST_NAME = /^(?!\.\.?$)[\w.-]+$/;
+export function checkListName(name) {
+    if (typeof name !== "string" || !LIST_NAME.test(name)) throw new Error(`Bad list name "${name}".`);
+    return name;
+}
+
 function dirtyTracker() {
     const original = new Map();
     const dirty = new Set();
@@ -60,8 +67,8 @@ export function fileStore(dataDir) {
     const notesDir = path.join(dataDir, "notes");
     const docs = new Map();
     const track = dirtyTracker();
-    const listPath = name => path.join(listsDir, `${name}.json`);
-    const notesPath = scope => path.join(notesDir, `${scope}.json`);
+    const listPath = name => path.join(listsDir, `${checkListName(name)}.json`);
+    const notesPath = scope => path.join(notesDir, `${checkListName(scope)}.json`);
     const readRaw = p => {
         try {
             return fs.readFileSync(p, "utf-8");
