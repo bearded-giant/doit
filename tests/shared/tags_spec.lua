@@ -13,12 +13,20 @@ describe("tags", function()
 		doit_state = require("doit.state")  -- Re-require after setup
 		
 		doit_state.todos = {
-			{ text = "Todo with #tag1", done = false },
-			{ text = "Todo with #tag2 and #tag3", done = false },
-			{ text = "Another #tag1 todo", done = true },
-			{ text = "No tags here", done = false },
+			{ id = "t1", text = "Todo with #tag1", done = false },
+			{ id = "t2", text = "Todo with #tag2 and #tag3", done = false },
+			{ id = "t3", text = "Another #tag1 todo", done = true },
+			{ id = "t4", text = "No tags here", done = false },
 		}
-		doit_state.save_to_disk = function() end -- Mock save_to_disk
+		-- the text rewrite is under test; the tool call that would persist it is stubbed
+		doit_state.update_todo = function(id, changes)
+			for _, todo in ipairs(doit_state.todos) do
+				if todo.id == id and changes.text then
+					todo.text = changes.text
+				end
+			end
+			return true
+		end
 	end)
 
 	pending("should get all unique tags", function()
@@ -80,8 +88,8 @@ describe("tags", function()
 
 	it("should match tags exactly, not as a prefix", function()
 		doit_state.todos = {
-			{ text = "fix #labels bug", done = false },
-			{ text = "ship #labels-web page", done = false },
+			{ id = "x1", text = "fix #labels bug", done = false },
+			{ id = "x2", text = "ship #labels-web page", done = false },
 		}
 
 		doit_state.rename_tag("labels", "tickets")

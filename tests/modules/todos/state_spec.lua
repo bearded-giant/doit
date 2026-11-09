@@ -3,20 +3,8 @@ local config = require("doit.config")
 
 describe("todos", function()
 	before_each(function()
-		-- Reinitialize the todos module for each test
-		package.loaded["doit.state"] = nil  -- Clear cached state
-		local doit = require("doit")
-		doit.setup({
-			modules = {
-				todos = { enabled = true }
-			}
-		})
-		doit_state = require("doit.state")  -- Re-require after setup
-		
-		doit_state.todos = {}
-		doit_state.deleted_todos = {}
+		doit_state = require("tests.doit_helpers").fresh_state()
 		doit_state.MAX_UNDO_HISTORY = 10
-		doit_state.save_to_disk = function() end -- Mock save_to_disk
 
 		_G._original_vim_notify = vim.notify
 		vim.notify = function() end
@@ -24,6 +12,7 @@ describe("todos", function()
 
 	after_each(function()
 		vim.notify = _G._original_vim_notify
+		require("tests.doit_helpers").restore()
 	end)
 
 	it("should add a todo", function()

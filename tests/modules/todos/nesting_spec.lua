@@ -102,18 +102,16 @@ describe("nesting render", function()
 	local doit_state
 
 	before_each(function()
-		package.loaded["doit.state"] = nil
-		local doit = require("doit")
-		doit.setup({ modules = { todos = { enabled = true } } })
-		doit_state = require("doit.state")
-		doit_state.todos = {}
-		doit_state.save_to_disk = function() end
-		doit_state.save_todos = function() end
+		doit_state = require("tests.doit_helpers").fresh_state()
+	end)
+
+	after_each(function()
+		require("tests.doit_helpers").restore()
 	end)
 
 	local function line_of(rows, todo)
 		for i, row in ipairs(rows) do
-			if row.todo == todo and row.is_first then
+			if row.todo and row.todo.id == todo.id and row.is_first then
 				return i
 			end
 		end
@@ -161,8 +159,8 @@ describe("nesting render", function()
 		local urgent = doit_state.add_todo("urgent", "urgent")
 		local second = doit_state.add_todo("second", {})
 		local first = doit_state.add_todo("first", "important")
-		second.sequence = 2
-		first.sequence = 1
+		doit_state.update_todo(second.id, { sequence = 2 })
+		doit_state.update_todo(first.id, { sequence = 1 })
 		doit_state.sort_todos()
 
 		local rows = require("doit.ui.main_window").build_render_rows()
@@ -195,15 +193,12 @@ describe("nesting mutations", function()
 	local doit_state
 
 	before_each(function()
-		package.loaded["doit.state"] = nil
-		local doit = require("doit")
-		doit.setup({ modules = { todos = { enabled = true } } })
-		doit_state = require("doit.state")
-		doit_state.todos = {}
-		doit_state.deleted_todos = {}
+		doit_state = require("tests.doit_helpers").fresh_state()
 		doit_state.MAX_UNDO_HISTORY = 10
-		doit_state.save_to_disk = function() end
-		doit_state.save_todos = function() end
+	end)
+
+	after_each(function()
+		require("tests.doit_helpers").restore()
 	end)
 
 	it("sets depth from the parent when creating a child", function()
@@ -229,6 +224,8 @@ describe("nesting mutations", function()
 
 		doit_state.delete_todo(1) -- the parent
 
+		-- the list reloads after each write, so read the live copies
+		child, grandchild = doit_state.get_todo_by_id(child.id), doit_state.get_todo_by_id(grandchild.id)
 		assert.is_nil(child.parent_id)
 		assert.are.equal(0, child.depth)
 		-- the grandchild stays attached to its parent and just re-depths
@@ -239,11 +236,11 @@ describe("nesting mutations", function()
 	it("promotes children when a completed parent is cleared", function()
 		local parent = doit_state.add_todo("parent", {})
 		local child = doit_state.add_todo("child", {}, parent.id)
-		parent.done = true
+		doit_state.complete_todo(1)
 
 		doit_state.delete_completed()
 
-		assert.is_nil(child.parent_id)
+		assert.is_nil(doit_state.get_todo_by_id(child.id).parent_id)
 		assert.are.equal(1, #doit_state.todos)
 	end)
 

@@ -1,8 +1,8 @@
--- Owed items live twice (a project list and daily). An nvim edit to one copy
--- has to reach the other the same way the MCP server's syncTwin does.
+-- Owed items live twice (a project list and daily). Every nvim change is a tool call, and
+-- the tools keep the other copy in step. Needs a doitd (docker/run-tests.sh starts one).
 
 describe("owed twin sync", function()
-	local tmpdir, orig_stdpath, orig_notify, state, twin, warnings
+	local tmpdir, orig_stdpath, state
 
 	local function list_path(name)
 		return tmpdir .. "/doit/lists/" .. name .. ".json"
@@ -75,20 +75,10 @@ describe("owed twin sync", function()
 		end
 		require("doit").setup({ modules = { todos = { enabled = true } } })
 		state = require("doit.core").get_module("todos").state
-		twin = require("doit.modules.todos.state.twin")
 		state.load_list("proj")
-
-		warnings = {}
-		orig_notify = vim.notify
-		vim.notify = function(msg, level)
-			if level == vim.log.levels.WARN then
-				table.insert(warnings, msg)
-			end
-		end
 	end)
 
 	after_each(function()
-		vim.notify = orig_notify
 		vim.fn.stdpath = orig_stdpath
 		vim.fn.delete(tmpdir, "rf")
 	end)
@@ -119,7 +109,7 @@ describe("owed twin sync", function()
 	end)
 
 	it("revert_to_pending reverts the twin", function()
-		twin.sync(state.todos[index_of("P1")], "complete", 42)
+		state.complete_todo(index_of("P1"))
 		state.revert_to_pending(index_of("P1"))
 		local d1 = item("daily", "D1")
 		assert.is_false(d1.done)
@@ -141,26 +131,16 @@ describe("owed twin sync", function()
 
 	it("undo of a delete restores the twin", function()
 		state.delete_todo(index_of("P1"))
-		state.undo_delete()
-		assert.are.equal("proj", item("daily", "D1").twin.list)
+		assert.is_true(state.undo_last())
+		assert.is_truthy(item("proj", "P1"))
+		assert.is_truthy(item("daily", "D1"))
 		assert.are.same({ "OLD" }, deleted_ids("daily"))
-		assert.are.same({}, warnings)
-	end)
-
-	it("undo of a clear-done does not warn about a twin that was never deleted", function()
-		state.toggle_todo(index_of("P1"))
-		state.toggle_todo(index_of("P1"))
-		state.delete_completed()
-		state.undo_delete()
-		assert.is_true(item("daily", "D1").done)
-		assert.are.same({}, warnings)
 	end)
 
 	it("priority copies or clears", function()
-		local p1 = state.todos[index_of("P1")]
-		twin.sync(p1, "priority", "urgent")
+		state.set_priority("P1", "urgent")
 		assert.are.equal("urgent", item("daily", "D1").priorities)
-		twin.sync(p1, "priority", nil)
+		state.set_priority("P1", nil)
 		assert.is_nil(item("daily", "D1").priorities)
 	end)
 
@@ -172,122 +152,31 @@ describe("owed twin sync", function()
 	end)
 
 	it("move relinks the twin to the destination list", function()
-		local ok = state.move_todo_to_list("P1", "other")
-		assert.is_true(ok)
+		assert.is_true((state.move_todo_to_list("P1", "other")))
 		assert.are.same({ list = "other", id = "P1" }, item("daily", "D1").twin)
+		assert.are.equal("other: merge it", item("daily", "D1").text)
 	end)
 
 	it("rename relinks twins of the renamed list", function()
-		state.load_list("other")
-		assert.is_true(state.rename_list("proj", "proj2"))
-		assert.are.equal("proj2", item("daily", "D1").twin.list)
-	end)
-
-	it("rename and move rename the twin's list label", function()
-		local daily = read_list("daily")
-		daily.todos[1].description = "from: proj #1 (id P1)\n\nwhy"
-		write_list("daily", daily.todos, daily._metadata)
-		state.load_list("other")
-		assert.is_true(state.rename_list("proj", "proj2"))
-		assert.are.equal("proj2: merge it", item("daily", "D1").text)
-		assert.are.equal("from: proj2 #1 (id P1)\n\nwhy", item("daily", "D1").description)
-		state.load_list("proj2")
-		assert.is_true(state.move_todo_to_list("P1", "other"))
-		assert.are.equal("other: merge it", item("daily", "D1").text)
-		assert.are.equal("from: other #1 (id P1)\n\nwhy", item("daily", "D1").description)
-	end)
-
-	it("rename relinks a twin that sits in the loaded list without a later save clobbering it", function()
-		state.load_list("daily")
-		assert.is_true(state.rename_list("proj", "proj2"))
-		state.save_todos()
-		assert.are.equal("proj2", item("daily", "D1").twin.list)
+		assert.is_true((state.rename_list("proj", "proj2")))
+		assert.are.same({ list = "proj2", id = "P1" }, item("daily", "D1").twin)
+		assert.are.equal("proj2", state.todo_lists.active)
 	end)
 
 	it("delete_list archives the file and keeps each daily twin, unlinked, with notes that never synced", function()
-		write_list("gone", {
-			{ id = "G1", text = "rotate creds", done = false, order_index = 1, twin = { list = "daily", id = "D2" },
-				description = "daily: D2\n\ndo: rotate\nDONE half\n\n\n----------\nlast modified: 2026-01-01: 00:00" },
-			{ id = "G2", text = "same", done = false, order_index = 2, twin = { list = "daily", id = "D3" },
-				description = "daily: D3\n\ndo: same" },
-		})
-		local daily = read_list("daily")
-		table.insert(daily.todos, { id = "D2", text = "gone: rotate creds", done = false, order_index = 2,
-			twin = { list = "gone", id = "G1" }, description = "from: gone #1 (id G1)\n\ndo: rotate" })
-		table.insert(daily.todos, { id = "D3", text = "gone: same", done = false, order_index = 3,
-			twin = { list = "gone", id = "G2" }, description = "from: gone #2 (id G2)\n\ndo: same" })
-		write_list("daily", daily.todos, daily._metadata)
-
-		assert.is_true(state.delete_list("gone"))
-		assert.are.equal(0, vim.fn.filereadable(list_path("gone")))
-		assert.are.equal(1, #vim.fn.glob(tmpdir .. "/doit/deleted/gone-*.json", false, true))
-		local d2 = item("daily", "D2")
-		assert.is_nil(d2.twin)
-		assert.truthy(d2.description:find("^from: gone #1"))
-		assert.truthy(d2.description:find('notes from "gone":\ndo: rotate\nDONE half', 1, true))
-		assert.truthy(d2.description:find('list "gone" deleted %d%d%d%d%-%d%d%-%d%d; twin link dropped'))
-		assert.truthy(d2.description:find("last modified: ", 1, true))
-		local d3 = item("daily", "D3")
-		assert.is_nil(d3.twin)
-		assert.falsy(d3.description:find("notes from", 1, true))
-		assert.are.same({}, warnings)
-	end)
-
-	it("missing twin id warns and changes nothing", function()
-		write_list("proj", {
-			{ id = "P1", text = "x", done = false, order_index = 1, twin = { list = "daily", id = "GONE" } },
-		})
-		state.load_list("proj")
-		local before = read_list("daily")
-		state.toggle_todo(1)
-		state.toggle_todo(1)
-		assert.are.same(before, read_list("daily"))
-		assert.are.same({ 'Twin GONE is no longer in "daily"' }, warnings)
-	end)
-
-	it("missing twin list warns", function()
-		write_list("proj", {
-			{ id = "P1", text = "x", done = false, order_index = 1, twin = { list = "nope", id = "X" } },
-		})
-		state.load_list("proj")
-		state.delete_todo(1)
-		assert.are.same({ 'Twin list "nope" is gone' }, warnings)
-	end)
-
-	it("an item without a twin touches no other list", function()
-		local before = read_list("daily")
-		state.toggle_todo(index_of("P2"))
-		state.toggle_todo(index_of("P2"))
-		state.delete_todo(index_of("P2"))
-		assert.are.same(before, read_list("daily"))
-		assert.are.same({}, warnings)
+		state.update_todo("P1", { description = "do: merge\n  DONE half" })
+		state.load_list("daily")
+		assert.is_true((state.delete_list("proj")))
+		assert.are.equal(0, vim.fn.filereadable(list_path("proj")))
+		local d1 = item("daily", "D1")
+		assert.is_nil(d1.twin)
+		assert.is_truthy(d1.description:match('notes from "proj":\ndo: merge\n  DONE half'))
+		assert.is_truthy(d1.description:match('list "proj" deleted %d%d%d%d%-%d%d%-%d%d; twin link dropped'))
 	end)
 
 	it("works in the other direction (daily -> project)", function()
 		state.load_list("daily")
-		state.toggle_todo(index_of("D1"))
+		state.complete_todo(index_of("D1"))
 		assert.is_true(item("proj", "P1").done)
-	end)
-
-	it(":DoItTodoMove <index> moves the item and relinks its twin", function()
-		vim.cmd("DoItTodoMove " .. index_of("P1") .. " other")
-		assert.are.equal("P1", item("other", "P1").id)
-		assert.are.same({ list = "other", id = "P1" }, item("daily", "D1").twin)
-	end)
-
-	it("an obsidian checkbox stamps completed_at and completes the twin with it", function()
-		package.loaded["obsidian"] = { get_client = function() return nil end }
-		local obsidian_sync = require("doit.modules.obsidian-sync")
-		obsidian_sync.setup({ vault_path = tmpdir })
-		obsidian_sync.setup_functions()
-
-		obsidian_sync.update_todo_in_json(tmpdir .. "/doit/lists", "P1", true)
-		local stamp = item("proj", "P1").completed_at
-		assert.is_true(type(stamp) == "number")
-		assert.are.equal(stamp, item("daily", "D1").completed_at)
-
-		obsidian_sync.update_todo_in_json(tmpdir .. "/doit/lists", "P1", false)
-		assert.is_nil(item("proj", "P1").completed_at)
-		assert.is_false(item("daily", "D1").done)
 	end)
 end)

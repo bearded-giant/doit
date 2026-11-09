@@ -4,7 +4,8 @@ RUN apk add --no-cache \
     tmux \
     git \
     lua5.3 \
-    luarocks
+    luarocks \
+    nodejs
 RUN mkdir -p /root/.config/nvim/pack/plugins/start
 # Create data directory for doit plugin to write to
 RUN mkdir -p /data && chmod 777 /data

@@ -68,8 +68,19 @@ describe("todos linking", function()
             todos = {},
             deleted_todos = {},
             MAX_UNDO_HISTORY = 10,
-            save_todos = function() end
+            todo_lists = { active = "daily" },
         }
+        -- the link fields are under test; the tool call is stubbed with its field semantics
+        state.update_todo = function(id, changes)
+            for _, todo in ipairs(state.todos) do
+                if todo.id == id then
+                    for k, v in pairs(changes.fields or {}) do
+                        todo[k] = v ~= vim.NIL and v or nil
+                    end
+                end
+            end
+            return true
+        end
         
         -- Load todos module
         todos_module = require("doit.modules.todos.state.todos")

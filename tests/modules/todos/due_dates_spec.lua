@@ -8,11 +8,19 @@ describe("todos due_dates", function()
     before_each(function()
         state = {
             todos = {
-                { text = "Todo 1", done = false },
-                { text = "Todo 2", done = false },
+                { id = "d1", text = "Todo 1", done = false },
+                { id = "d2", text = "Todo 2", done = false },
             },
-            save_todos = function() end,
         }
+        -- validation is under test; the tool call is stubbed with the field semantics
+        state.update_todo = function(id, changes)
+            for _, todo in ipairs(state.todos) do
+                if todo.id == id then
+                    todo.due_date = changes.due ~= "" and changes.due or nil
+                end
+            end
+            return true
+        end
         due_dates = due_dates_module.setup(state)
     end)
 

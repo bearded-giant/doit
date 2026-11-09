@@ -1,7 +1,7 @@
 -- Enter is the tmux manager's "open item" key, so the nvim main window binds it
 -- to the same thing: detail on a todo row, the note on a note row.
 describe("main window keys", function()
-	local main_window, todo_actions, doit_state
+	local main_window, todo_actions, doit_state, note
 
 	local function line_where(pred)
 		for i, row in ipairs(main_window.build_render_rows()) do
@@ -18,16 +18,8 @@ describe("main window keys", function()
 	end
 
 	before_each(function()
-		package.loaded["doit.state"] = nil
-		require("doit").setup({ modules = { todos = { enabled = true } } })
-		doit_state = require("doit.state")
-		doit_state.todos = {}
-		doit_state.save_to_disk = function() end
-		doit_state.save_todos = function() end
-		doit_state.load_list = function() end
-		doit_state.get_notes = function()
-			return { { id = "n1", title = "scratch" } }
-		end
+		doit_state = require("tests.doit_helpers").fresh_state()
+		note = doit_state.add_note("scratch", "")
 		main_window = require("doit.ui.main_window")
 		todo_actions = require("doit.ui.todo_actions")
 	end)
@@ -42,10 +34,10 @@ describe("main window keys", function()
 
 	it("opens the detail of the todo under the cursor", function()
 		local todo = doit_state.add_todo("ship the fix", {})
-		todo.description = "why it broke"
+		doit_state.update_todo(todo.id, { description = "why it broke" })
 		main_window.toggle_todo_window()
 		local main_win = vim.api.nvim_get_current_win()
-		vim.api.nvim_win_set_cursor(main_win, { line_where(function(r) return r.todo == todo end), 0 })
+		vim.api.nvim_win_set_cursor(main_win, { line_where(function(r) return r.todo and r.todo.id == todo.id end), 0 })
 
 		press("<CR>")
 
@@ -68,7 +60,7 @@ describe("main window keys", function()
 		press("<CR>")
 		todo_actions.edit_note = original
 
-		assert.are.equal("n1", opened and opened.id)
+		assert.are.equal(note.id, opened and opened.id)
 	end)
 
 	it("walks section headers with [ and ] like tmux, wrapping at the ends", function()

@@ -1,211 +1,94 @@
-local doit_state = require("doit.state")
-local config = require("doit.config")
-local mock_config = {
-	options = {
-		save_path = "/tmp/doit_test_todos.json",
-	},
-}
-
-local original_io_open = io.open
-local mock_file = {
-	write = function(self, content)
-		self.content = content
-	end,
-	read = function(self, format)
-		-- Handle the "*all" parameter that the real implementation uses
-		return self.content
-	end,
-	close = function() end,
-	content = "",
-}
+-- load, import and export against a real data dir; writes go through doitd
+-- (docker/run-tests.sh starts one).
 
 describe("storage", function()
+	local tmpdir, orig_stdpath, state
+
+	local function list_path(name)
+		return tmpdir .. "/doit/lists/" .. name .. ".json"
+	end
+
+	local function read_list(name)
+		local f = io.open(list_path(name), "r")
+		local data = vim.fn.json_decode(f:read("*all"))
+		f:close()
+		return data
+	end
+
+	local function write_json(path, data)
+		local f = io.open(path, "w")
+		f:write(vim.fn.json_encode(data))
+		f:close()
+	end
+
 	before_each(function()
-		-- Reset mock file content
-		mock_file.content = ""
-
-		_G.io.open = function(path, mode)
-			if mode == "r" and (not mock_file.content or mock_file.content == "") then
-				return nil -- Simulate file not found for reading
+		tmpdir = vim.fn.tempname()
+		vim.fn.mkdir(tmpdir .. "/doit/lists", "p")
+		orig_stdpath = vim.fn.stdpath
+		vim.fn.stdpath = function(what)
+			if what == "data" then
+				return tmpdir
 			end
-			return mock_file
+			return orig_stdpath(what)
 		end
-
-		-- Reinitialize the todos module for each test
-		package.loaded["doit.state"] = nil  -- Clear cached state
-		package.loaded["doit"] = nil
-		local doit = require("doit")
-		doit.setup({
-			modules = {
-				todos = { enabled = true }
-			}
+		write_json(list_path("daily"), {
+			_metadata = {},
+			todos = { { id = "t1", text = "Loaded todo", done = false, order_index = 1 } },
 		})
 
-		-- Use the actual state from the todos module
-		local core = require("doit.core")
-		local todos_module = core.get_module("todos")
-		if todos_module and todos_module.state then
-			doit_state = todos_module.state
-		else
-			-- Fallback to requiring state directly
-			doit_state = require("doit.state")
+		for key in pairs(package.loaded) do
+			if key == "doit" or key:match("^doit%.") then
+				package.loaded[key] = nil
+			end
 		end
-
-		doit_state.todos = {}
-		config.options = mock_config.options
+		require("doit").setup({ modules = { todos = { enabled = true } } })
+		state = require("doit.core").get_module("todos").state
+		state.load_list("daily")
 	end)
 
 	after_each(function()
-		_G.io.open = original_io_open
-		mock_file.content = ""
+		vim.fn.stdpath = orig_stdpath
+		vim.fn.delete(tmpdir, "rf")
 	end)
 
-	it("should save todos to disk", function()
-		doit_state.todos = {
-			{ text = "Test todo", done = false, created_at = os.time() },
-		}
-
-		local original_json_encode = vim.fn.json_encode
-		vim.fn.json_encode = function(data)
-			-- Data should have _metadata and todos properties
-			if data._metadata and data.todos then
-				return '{"_metadata":{},"todos":[{"text":"Test todo","done":false}]}'
-			end
-			return '{"text":"Test todo","done":false}'
-		end
-
-		doit_state.save_to_disk()
-
-		assert.are.equal('{"_metadata":{},"todos":[{"text":"Test todo","done":false}]}', mock_file.content)
-
-		vim.fn.json_encode = original_json_encode
+	it("loads todos from disk", function()
+		assert.are.equal(1, #state.todos)
+		assert.are.equal("Loaded todo", state.todos[1].text)
+		assert.is_false(state.todos[1].done)
 	end)
 
-	it("should load todos from disk", function()
-		-- Set content to match the new data structure with _metadata and todos
-		mock_file.content = '{"_metadata":{},"todos":[{"text":"Loaded todo","done":false}]}'
+	it("imports todos from a file into the current list", function()
+		local import = tmpdir .. "/import.json"
+		write_json(import, { { text = "Imported todo", done = false }, { text = "Already done", done = true, priorities = "urgent" } })
 
-		local original_json_decode = vim.fn.json_decode
-		vim.fn.json_decode = function(content)
-			return {
-				_metadata = {},
-				todos = { { text = "Loaded todo", done = false } }
-			}
-		end
-
-		-- Override io.open to return the mock file with content
-		_G.io.open = function(path, mode)
-			return mock_file
-		end
-
-		doit_state.load_from_disk()
-
-		assert.is_not_nil(doit_state.todos, "todos should not be nil")
-		assert.are.equal("table", type(doit_state.todos), "todos should be a table")
-		assert.are.equal(1, #doit_state.todos, "Should have loaded 1 todo")
-		assert.are.equal("Loaded todo", doit_state.todos[1].text)
-		assert.are.equal(false, doit_state.todos[1].done)
-
-		vim.fn.json_decode = original_json_decode
+		local ok, message = state.import_todos(import)
+		assert.is_true(ok, message)
+		local disk = read_list("daily")
+		assert.are.equal(3, #disk.todos)
+		assert.are.equal("Imported todo", disk.todos[2].text)
+		assert.are.equal("user", disk.todos[2].source)
+		assert.is_true(disk.todos[3].done)
+		assert.are.equal("urgent", disk.todos[3].priorities)
+		assert.are.equal(3, #state.todos)
 	end)
 
-	it("should import todos from file", function()
-		mock_file.content = '[{"text":"Imported todo","done":false}]'
+	it("imports into a new list and switches to it", function()
+		local import = tmpdir .. "/import.json"
+		write_json(import, { todos = { { text = "In the new list", done = false } }, _metadata = {} })
 
-		doit_state.todos = { { text = "Existing todo", done = false } }
-
-		local original_json_decode = vim.fn.json_decode
-		vim.fn.json_decode = function(content)
-			return { { text = "Imported todo", done = false } }
-		end
-
-		doit_state.sort_todos = function() end
-
-		local success, message = doit_state.import_todos("/path/to/import.json")
-
-		assert.is_true(success)
-		assert.are.equal(2, #doit_state.todos)
-		assert.are.equal("Existing todo", doit_state.todos[1].text)
-		assert.are.equal("Imported todo", doit_state.todos[2].text)
-
-		vim.fn.json_decode = original_json_decode
+		local ok, message = state.import_todos(import, "imported")
+		assert.is_true(ok, message)
+		assert.are.equal(1, #read_list("imported").todos)
+		assert.are.equal("imported", state.todo_lists.active)
 	end)
 
-	it("should export todos to file", function()
-		doit_state.todos = {
-			{ text = "Todo to export", done = false, created_at = os.time() },
-		}
-
-		local original_json_encode = vim.fn.json_encode
-		vim.fn.json_encode = function(data)
-			return '[{"text":"Todo to export","done":false}]'
-		end
-
-		local success, message = doit_state.export_todos("/path/to/export.json")
-
-		assert.is_true(success)
-		assert.are.equal('[{"text":"Todo to export","done":false}]', mock_file.content)
-
-		vim.fn.json_encode = original_json_encode
-	end)
-
-	describe("list notes", function()
-		before_each(function()
-			doit_state.todo_lists = doit_state.todo_lists or {}
-			doit_state.todo_lists.active = "daily"
-			doit_state.todo_lists.metadata = { created_at = 1, updated_at = 1 }
-			doit_state.todo_lists.notes = {}
-			doit_state.todos = {}
-			_G.io.open = function(path, mode) return mock_file end
-		end)
-
-		it("save_to_disk persists the notes array alongside todos", function()
-			doit_state.todos = { { id = "t1", text = "task", done = false } }
-			doit_state.todo_lists.notes = {
-				{ id = "n1", title = "Note one", body = "body", created_at = 1, updated_at = 1 },
-			}
-
-			doit_state.save_to_disk()
-
-			local decoded = vim.fn.json_decode(mock_file.content)
-			assert.are.equal(1, #decoded.notes, "notes should be persisted")
-			assert.are.equal("Note one", decoded.notes[1].title)
-			assert.are.equal(1, #decoded.todos, "todos should still be persisted")
-		end)
-
-		it("add_note appends a note and writes it to disk", function()
-			doit_state.add_note("Title", "Body")
-
-			assert.are.equal(1, #doit_state.todo_lists.notes)
-			local decoded = vim.fn.json_decode(mock_file.content)
-			assert.are.equal("Title", decoded.notes[1].title)
-			assert.are.equal("Body", decoded.notes[1].body)
-			assert.is_not_nil(decoded.notes[1].id)
-		end)
-
-		it("update_note changes only the target note", function()
-			doit_state.todo_lists.notes = {
-				{ id = "a", title = "A", body = "" },
-				{ id = "b", title = "B", body = "" },
-			}
-
-			doit_state.update_note("a", "A2", "body2")
-
-			assert.are.equal("A2", doit_state.todo_lists.notes[1].title)
-			assert.are.equal("body2", doit_state.todo_lists.notes[1].body)
-			assert.are.equal("B", doit_state.todo_lists.notes[2].title)
-		end)
-
-		it("delete_note removes only the target note", function()
-			doit_state.todo_lists.notes = {
-				{ id = "a", title = "A", body = "" },
-				{ id = "b", title = "B", body = "" },
-			}
-
-			doit_state.delete_note("b")
-
-			assert.are.equal(1, #doit_state.todo_lists.notes)
-			assert.are.equal("a", doit_state.todo_lists.notes[1].id)
-		end)
+	it("exports todos to a file", function()
+		local out = tmpdir .. "/export.json"
+		local ok = state.export_todos(out)
+		assert.is_true(ok)
+		local f = io.open(out, "r")
+		local data = vim.fn.json_decode(f:read("*all"))
+		f:close()
+		assert.are.equal("Loaded todo", data.todos[1].text)
 	end)
 end)

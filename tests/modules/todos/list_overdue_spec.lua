@@ -88,7 +88,7 @@ describe("list overdue metadata", function()
 	it("never writes the derived counts back to disk", function()
 		state.get_available_lists()
 		state.load_list("daily")
-		state.save_todos()
+		state.add_todo("a write after the counts were derived", {})
 
 		local f = io.open(tmpdir .. "/doit/lists/daily.json", "r")
 		local data = vim.fn.json_decode(f:read("*all"))

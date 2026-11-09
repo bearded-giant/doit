@@ -31,7 +31,8 @@ if [ -n "$TEST_PATTERN" ]; then
     fi
 fi
 
-TEST_CMD="cd /plugin"
+# the nvim specs write through doitd; one daemon per run serves whatever temp data dir each spec uses
+TEST_CMD="cd /plugin; export DOIT_STATE_DIR=/tmp/doit-state DOIT_ANY_DATA_DIR=1; mkdir -p /tmp/doit-state; (node packages/daemon/doitd.js > /tmp/doitd.log 2>&1 &); for i in \$(seq 1 50); do [ -S /tmp/doit-state/doitd.sock ] && break; sleep 0.1; done"
 for target in $TARGETS; do
     TEST_CMD="$TEST_CMD; nvim --headless -c \"lua require('plenary.test_harness').test_directory('$target')\" -c \"qa!\""
 done

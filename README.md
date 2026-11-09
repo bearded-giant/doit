@@ -716,7 +716,7 @@ Tests run per surface: the Node packages under `packages/` use Node's built-in r
 | Surface | Command |
 |---------|---------|
 | Node packages | `npm install && npm test` (one package: `npm test -w packages/core`) |
-| Neovim plugin | `docker/run-tests.sh` |
+| Neovim plugin | `docker/run-tests.sh` (starts a doitd in the container; the specs write through it) |
 | tmux add-on | `tests/tmux/run-tests.sh` |
 | Help docs | `make check-docs` |
 
