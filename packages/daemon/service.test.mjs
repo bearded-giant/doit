@@ -8,7 +8,7 @@ process.env.HOME = home;
 delete process.env.DOIT_SERVER_URL;
 delete process.env.DOIT_SYNC_INTERVAL_MS;
 
-const { serviceEnv } = await import("./service.js");
+const { installService, serviceEnv } = await import("./service.js");
 const { syncConfig } = await import("./sync.js");
 
 // a fresh machine installs local-only at the default pull interval
@@ -43,6 +43,23 @@ process.env.DOIT_SYNC_INTERVAL_MS = "60000";
 assert.equal(syncConfig({}).interval, 60000);
 process.env.DOIT_SYNC_INTERVAL_MS = "nonsense";
 assert.equal(syncConfig({}).interval, 10000);
+
+// linux: a reinstall restarts a running daemon, or it keeps the env it started with
+const bin = path.join(home, "bin");
+const calls = path.join(home, "systemctl.log");
+fs.mkdirSync(bin);
+fs.writeFileSync(path.join(bin, "systemctl"), `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+const realPath = process.env.PATH;
+const realPlatform = process.platform;
+process.env.PATH = `${bin}:${realPath}`;
+Object.defineProperty(process, "platform", { value: "linux" });
+try {
+    installService();
+} finally {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+    process.env.PATH = realPath;
+}
+assert.deepEqual(fs.readFileSync(calls, "utf-8").trim().split("\n"), ["--user daemon-reload", "--user enable doitd", "--user restart doitd"]);
 
 fs.rmSync(home, { recursive: true, force: true });
 console.log("service: ok");

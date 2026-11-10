@@ -121,7 +121,9 @@ export function installService() {
     }
     writeUnit();
     run("systemctl", ["--user", "daemon-reload"]);
-    run("systemctl", ["--user", "enable", "--now", "doitd"]);
+    run("systemctl", ["--user", "enable", "doitd"]);
+    // enable --now leaves a running daemon on the env it started with
+    run("systemctl", ["--user", "restart", "doitd"]);
     return `installed ${unitPath()}; logs: journalctl --user -u doitd`;
 }
 
