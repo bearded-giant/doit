@@ -1,4 +1,4 @@
-*doit_calendar.txt*  Calendar module for do-it.nvim
+*doit_calendar.txt*  Calendar module for doit
 
 ==============================================================================
 CONTENTS                                              *doit-calendar-contents*
@@ -50,7 +50,7 @@ For Docker/Linux (Mock Data):
 ==============================================================================
 CONFIGURATION                                   *doit-calendar-configuration*
 
-Add to your do-it.nvim setup:
+Add to your doit setup:
 
 >lua
   require("doit").setup({

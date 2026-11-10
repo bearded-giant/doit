@@ -1,6 +1,6 @@
-# Do-It.nvim Development Guide
+# doit Development Guide
 
-This document explains how to set up a development environment and use debugging tools for Do-It.nvim.
+This document explains how to set up a development environment and use debugging tools for doit.
 
 ## Enabling Development Mode
 
@@ -21,7 +21,7 @@ When development mode is enabled, the following commands become available:
 
 | Command | Description |
 |---------|-------------|
-| `:DoitReload` | Reload the Do-It.nvim plugin |
+| `:DoitReload` | Reload the doit plugin |
 | `:DoitAutoReload` | Toggle automatic plugin reloading when source files change |
 | `:DoitDebug` | Start a Lua debug server for the plugin (requires OSV) |
 | `:DoitDebugConnect` | Start debug server and connect DAP |
@@ -69,7 +69,7 @@ The plugin supports debugging with [nvim-dap](https://github.com/mfussenegger/nv
 
 ### Debugging Workflow
 
-1. Enable development mode in your Do-It.nvim config.
+1. Enable development mode in your doit config.
 
 2. Start a debugging session:
    - Option 1: Run `:DoitDebugConnect` command

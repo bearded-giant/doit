@@ -1,6 +1,6 @@
 # DoIt Calendar Module v2.0
 
-A calendar integration module for do-it.nvim that provides a native Neovim interface for viewing calendar events using macOS's `icalbuddy` command-line tool.
+A calendar integration module for doit that provides a native Neovim interface for viewing calendar events using macOS's `icalbuddy` command-line tool.
 
 ## What's New in v2.0
 
@@ -25,7 +25,7 @@ A calendar integration module for do-it.nvim that provides a native Neovim inter
 
 - macOS with `icalbuddy` installed
 - Neovim 0.8+
-- do-it.nvim plugin
+- doit plugin
 
 ### Installing icalbuddy
 
@@ -35,7 +35,7 @@ brew install icalbuddy
 
 ## Configuration
 
-The calendar module is configured through your do-it.nvim setup:
+The calendar module is configured through your doit setup:
 
 ```lua
 require('doit').setup({
@@ -237,7 +237,7 @@ calendar.refresh()
 
 ## Contributing
 
-The calendar module is part of do-it.nvim. To contribute:
+The calendar module is part of doit. To contribute:
 
 1. Check existing issues for calendar-related bugs or features
 2. Test changes with different calendar configurations
@@ -246,4 +246,4 @@ The calendar module is part of do-it.nvim. To contribute:
 
 ## License
 
-Part of do-it.nvim - see main project for license details.
+Part of doit - see main project for license details.

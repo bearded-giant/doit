@@ -30,18 +30,18 @@ Table of Contents                                          *doit-contents*
 ==============================================================================
 1. doit                                                        *doit-intro*
 
-Do-It.nvim is a minimalist todo list manager for Neovim, designed with simplicity and
+doit is a minimalist todo list manager for Neovim, designed with simplicity and
 efficiency in mind. It provides a clean, distraction-free interface to manage
 your tasks directly within Neovim.
 
-Do-It.nvim is my personal way of how I want to track my tasks and todos. As a 
+doit is my personal way of how I want to track my tasks and todos. As a 
 Principal Engineer, I have a lot of things to keep track of, and I wanted a 
 simple way to do that without leaving my editor. I've tried a lot of todo list 
 managers, and they all seem to be too much for me. I just want to keep track of 
 what I need to do, and that's it. I don't need a bunch of bells and whistles. 
 I just need to know what I need to do.
 
-Do-It.nvim is 100% built on top of Dooing by atiladefreitas. Do-It.nvim is a fork with 
+doit is 100% built on top of Dooing by atiladefreitas. doit is a fork with 
 some heavy modifications for customizations for how I work, while maintaining 
 the core functionality.
 
@@ -84,7 +84,7 @@ Then run `:Lazy sync` to install and sync the plugin, or relaunch Neovim.
 
 CONFIGURATION                                            *doit-configuration*
 
-Do-It.nvim uses a nested configuration structure that separates core framework
+doit uses a nested configuration structure that separates core framework
 settings from module-specific options. This organization makes the configuration
 easier to navigate and understand.
 
@@ -460,7 +460,7 @@ Note: Each todo can have only one priority assigned.
 
 TODO LISTS                                                    *doit-lists*
 
-Do-It.nvim supports multiple todo lists, allowing you to organize tasks by
+doit supports multiple todo lists, allowing you to organize tasks by
 project, context, or any category you prefer.
 
 Features:
@@ -645,7 +645,7 @@ Highlight Groups~
 
 PROJECT NOTES                                                 *doit-notes*
 
-Project Notes adds project-specific notes functionality to Do-It.nvim, inspired by 
+Project Notes adds project-specific notes functionality to doit, inspired by 
 maple.nvim. This feature allows you to maintain separate notes for each project
 while working in Neovim, making it easy to document project-specific information 
 and thoughts without leaving your editor.
@@ -656,7 +656,7 @@ Features:
 - Easy switching between global and project modes
 - Persistent storage of notes in JSON format
 - Markdown highlighting for better readability
-- Floating window interface consistent with other Do-It.nvim components
+- Floating window interface consistent with other doit components
 
 Project Notes is designed to complement your to-do workflow:
 - Store project-specific documentation alongside your to-dos
@@ -729,7 +729,7 @@ Failure modes:~
 
 ACKNOWLEDGMENTS
 
-Do-It.nvim is FOR SURE based on Dooing by atiladefreitas. Special thanks to 
+doit is FOR SURE based on Dooing by atiladefreitas. Special thanks to 
 him for creating the original plugin that inspired this fork.
 
 The Project Notes feature was inspired by maple.nvim's project notes functionality.

@@ -1,6 +1,6 @@
-# DoIt.nvim Modules
+# doit Modules
 
-DoIt.nvim uses a modular architecture where each feature is implemented as a standalone module that integrates with the core framework.
+doit uses a modular architecture where each feature is implemented as a standalone module that integrates with the core framework.
 
 ## Available Modules
 
@@ -31,7 +31,7 @@ lua/doit/modules/{module_name}/
 
 ## Creating Custom Modules
 
-Modules can be created as plugins that integrate with DoIt.nvim. Each module must:
+Modules can be created as plugins that integrate with doit. Each module must:
 
 1. Provide metadata for registration
 2. Implement a `setup()` function
@@ -77,7 +77,7 @@ return M
 
 ## Module Configuration
 
-Modules are configured in the `modules` section of the DoIt.nvim setup:
+Modules are configured in the `modules` section of the doit setup:
 
 ```lua
 require("doit").setup({

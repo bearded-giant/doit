@@ -1,6 +1,6 @@
-# DoIt.nvim Plugin Development Guide
+# doit Plugin Development Guide
 
-This guide covers everything you need to know to create a new plugin/module for DoIt.nvim.
+This guide covers everything you need to know to create a new plugin/module for doit.
 
 ## Quick Start
 

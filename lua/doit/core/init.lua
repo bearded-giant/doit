@@ -122,7 +122,7 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("DoItPlugins", function(opts)
         M.handle_plugin_command(opts)
     end, {
-        desc = "Manage DoIt.nvim plugins",
+        desc = "Manage doit plugins",
         nargs = "*",
         complete = function(arglead, cmdline, cursorpos)
             local args = vim.split(cmdline, "%s+", { trimempty = true })

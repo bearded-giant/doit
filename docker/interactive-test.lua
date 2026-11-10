@@ -14,7 +14,7 @@ vim.keymap.set("n", "<leader>dl", "<cmd>DoItList<CR>", { desc = "Toggle DoIt Lis
 
 -- Print instructions
 print([[
-=== Do-It.nvim Interactive Test Environment ===
+=== doit Interactive Test Environment ===
 
 Available commands:
 - <leader>do : Open todos window

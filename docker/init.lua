@@ -201,7 +201,7 @@ vim.keymap.set("n", "<leader>dC", "<cmd>DoItCalendar<CR>", { desc = "Toggle DoIt
 -- Welcome message function that reads from HELP.txt
 local function show_welcome()
 	print("=====================================")
-	print("Do-It.nvim Interactive Environment")
+	print("doit Interactive Environment")
 	print("=====================================")
 	print("")
 	

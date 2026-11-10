@@ -44,7 +44,7 @@ function M.create_help_window()
 		height = height,
 		style = "minimal",
 		border = "rounded",
-		title = " Do-It.nvim Help ",
+		title = " doit Help ",
 		title_pos = "center",
 		footer = " [q/Esc/?] to close ",
 		footer_pos = "center",

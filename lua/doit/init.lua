@@ -397,7 +397,7 @@ function M.load_module(name, opts)
 			return module
 		else
 			vim.notify(
-				"Do-It.nvim: Failed to load module '" .. name .. "': " .. (err or "Unknown error"),
+				"doit: Failed to load module '" .. name .. "': " .. (err or "Unknown error"),
 				vim.log.levels.WARN
 			)
 			return nil
@@ -420,7 +420,7 @@ function M.load_module(name, opts)
 		M[name] = module.setup(opts)
 		return M[name]
 	else
-		vim.notify("Do-It.nvim: Failed to load module '" .. name .. "'", vim.log.levels.WARN)
+		vim.notify("doit: Failed to load module '" .. name .. "'", vim.log.levels.WARN)
 		return nil
 	end
 end

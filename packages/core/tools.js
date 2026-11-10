@@ -49,7 +49,7 @@ const NOTE_FORMAT_HINT =
     " multi-line code with ```). Don't cram it into one dense paragraph." +
     " (Exception: todos whose text starts 'claude:' are machine-read — plain is fine.)";
 
-export const INSTRUCTIONS = `Do-it.nvim todo manager. Data lives at ~/.local/share/nvim/doit/lists/*.json, NOT in any project directory. Always use these tools for todo reads and writes; NEVER bash, grep, find, cat, or python on the JSON files.
+export const INSTRUCTIONS = `doit todo manager. Data lives at ~/.local/share/nvim/doit/lists/*.json, NOT in any project directory. Always use these tools for todo reads and writes; NEVER bash, grep, find, cat, or python on the JSON files.
 
 Default list: "daily", unless the DOIT_ACTIVE_LIST env var names another. Every call without list= goes there. The user's tmux window links and global pointer are view state and never change this default, so pass list= explicitly for project work. switch_list changes the user's views only; call it only when the user asks. When list_lists marks the active list "(via DOIT_ACTIVE_LIST env override ...)", tell the user: a stale export in the shell that launched this server pins every omitted list= to one list.
 

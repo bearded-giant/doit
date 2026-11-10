@@ -1,4 +1,4 @@
-*doit_tmux.txt*  Tmux integration for do-it.nvim
+*doit_tmux.txt*  Tmux integration for doit
 
 ==============================================================================
 CONTENTS                                                *doit-tmux-contents*
@@ -31,7 +31,7 @@ Key features:
 - Status bar integration
 - Shared storage with Neovim (session.json)
 
-This is an optional add-on to the core do-it.nvim plugin. For Neovim
+This is an optional add-on to the core doit plugin. For Neovim
 plugin documentation, see |doit.txt| (tmux overview: |doit-tmux|)
 
 ==============================================================================

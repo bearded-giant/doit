@@ -1,6 +1,6 @@
 # Todos Module Documentation
 
-The todos module provides comprehensive task management functionality within Neovim. This is the core module of DoIt.nvim, offering a complete GTD (Getting Things Done) workflow.
+The todos module provides comprehensive task management functionality within Neovim. This is the core module of doit, offering a complete GTD (Getting Things Done) workflow.
 
 ## Features
 

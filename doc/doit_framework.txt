@@ -1,4 +1,4 @@
-*doit_framework.txt*      Modular Framework for Do-It.nvim     *doit-framework*
+*doit_framework.txt*      Modular Framework for doit     *doit-framework*
 
 ==============================================================================
 Table of Contents                                      *doit-framework-toc*
@@ -18,7 +18,7 @@ Table of Contents                                      *doit-framework-toc*
 ==============================================================================
 1. Framework Overview                                  *doit-framework-overview*
 
-Do-It.nvim 2.0 introduces a modular framework that allows individual components
+doit 2.0 introduces a modular framework that allows individual components
 to work independently or together as part of a cohesive system. This approach
 provides greater flexibility and extensibility while maintaining the simplicity
 of the original plugin.
@@ -42,7 +42,7 @@ MODULES                                                 *doit-framework-modules*
 
 The framework includes the following built-in modules:
 
-- todos: Task management functionality (original do-it.nvim core)
+- todos: Task management functionality (original doit core)
 - notes: Project-specific notes (maple.nvim-inspired notes)
 
 Each module can be:

@@ -174,7 +174,7 @@ function M.get_markdown_help()
 	local lines = {}
 	
 	-- Header
-	table.insert(lines, "# Do-It.nvim Keybindings and Commands Reference")
+	table.insert(lines, "# doit Keybindings and Commands Reference")
 	table.insert(lines, "")
 	table.insert(lines, "<!-- This file is auto-generated from lua/doit/help.lua - DO NOT EDIT DIRECTLY -->")
 	table.insert(lines, "<!-- To update: make update-help -->")
@@ -320,7 +320,7 @@ function M.show_help_window()
 		height = height,
 		style = "minimal",
 		border = "rounded",
-		title = " Do-It.nvim Help ",
+		title = " doit Help ",
 		title_pos = "center",
 	})
 	

@@ -1,6 +1,6 @@
-# Do-It.nvim Documentation
+# doit Documentation
 
-This directory contains detailed documentation for Do-It.nvim developers and contributors.
+This directory contains detailed documentation for doit developers and contributors.
 
 ## Documentation Structure
 

@@ -1,4 +1,4 @@
-# Do-It.nvim Keybindings and Commands Reference
+# doit Keybindings and Commands Reference
 
 <!-- This file is auto-generated from lua/doit/help.lua - DO NOT EDIT DIRECTLY -->
 <!-- To update: make update-help -->

@@ -1,8 +1,8 @@
-# Do-It.nvim Framework Architecture
+# doit Framework Architecture
 
 ## Overview
 
-Do-It.nvim 2.0 introduces a modular framework that allows components to work independently or together. This architecture enables:
+doit 2.0 introduces a modular framework that allows components to work independently or together. This architecture enables:
 
 - Loading only the modules you need
 - Using modules standalone or together

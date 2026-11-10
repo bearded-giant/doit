@@ -1,6 +1,6 @@
-# Do-It.nvim Docker Environment
+# doit Docker Environment
 
-This directory contains the Docker environment for testing and demonstrating the Do-It.nvim plugin.
+This directory contains the Docker environment for testing and demonstrating the doit plugin.
 
 ## Quick Start
 

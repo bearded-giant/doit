@@ -1,4 +1,4 @@
-*doit_linking.txt*  Documentation for do-it.nvim note linking feature
+*doit_linking.txt*  Documentation for doit note linking feature
 
 ==============================================================================
 NOTE LINKING                                         *doit-note-linking*

@@ -1,6 +1,6 @@
-# Note Linking in do-it.nvim
+# Note Linking in doit
 
-This document describes the note linking feature added to do-it.nvim, which allows linking todos and notes together using Obsidian-like `[[]]` syntax.
+This document describes the note linking feature added to doit, which allows linking todos and notes together using Obsidian-like `[[]]` syntax.
 
 ## Overview
 

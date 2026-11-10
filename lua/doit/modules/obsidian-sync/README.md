@@ -1,6 +1,6 @@
-# Obsidian-Sync Module for DoIt.nvim
+# Obsidian-Sync Module for doit
 
-Integration module that bridges DoIt.nvim todos with Obsidian.nvim markdown notes.
+Integration module that bridges doit todos with Obsidian.nvim markdown notes.
 
 ## Features
 

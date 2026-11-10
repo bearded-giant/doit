@@ -1,6 +1,6 @@
-# do-it.nvim Test Structure
+# doit Test Structure
 
-This directory contains all tests for the do-it.nvim framework and its modules.
+This directory contains all tests for the doit framework and its modules.
 
 ## Directory Organization
 
