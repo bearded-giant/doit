@@ -722,22 +722,22 @@ The same state shows in the nvim statusline (`sync_badge`), the tmux status segm
 
 The server also hosts a single-owner Slack app. Create it from `packages/server/slack-manifest.yaml` (replace `<app>` with your deployment host), then set `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_OWNER_ID` (your Slack user id), `SLACK_FEED_CHANNEL` (a private channel the bot is invited to), and `DOIT_TZ` (an IANA zone for timestamps) on the Vercel project. Every request is checked against the signing secret and refused for anyone but the owner.
 
-`/doit` speaks the CLI's vocabulary and answers only you:
+`/doit` speaks the CLI's vocabulary and answers only you. A DM to the app takes the same commands without the `/doit`, so the DM works like a terminal:
 
 | Command | What it does |
 |---------|--------------|
 | `/doit` | Pending items on the current list |
 | `/doit help` | Every command with an example |
-| `/doit use [list]` | Show the current list, or switch to another |
+| `/doit lists <list>`, `/doit use <list>` | Switch the current list and show its items |
 | `/doit ls [list]`, `/doit lists`, `/doit find <text>` | Read lists and search |
-| `/doit add <text> [!\|!!\|!!!] [@list] [due:YYYY-MM-DD]` | Add an item; `!` is important, `!!` urgent, `!!!` critical |
+| `/doit new <text> [!\|!!\|!!!] [@list] [due:YYYY-MM-DD]` | Add an item (`add` works too); `!` is important, `!!` urgent, `!!!` critical |
 | `/doit done\|start\|reopen\|rm <item>` | Change status or delete (`rm` asks with a button first) |
 | `/doit mv <item> @list`, `/doit note <item> <text>` | Move, or append a note |
 | `/doit list add\|rename\|rm <name>` | Manage lists |
 
-The current list starts as `daily`. `/doit`, `ls`, `add`, and `#rank` refs use it when you name no list, and the app's Home tab shows the same list: switching in either place switches both. If the current list is renamed or deleted, commands fall back to `daily` until you pick another.
+The current list starts as `daily`. `/doit`, `ls`, `new`, and `#rank` refs use it when you name no list, and every reply starts with it (`daily › Added ...`), so you always know where you are. The app's Home tab shows the same list: switching in either place switches both. If the current list is renamed or deleted, commands fall back to `daily` until you pick another.
 
-An `<item>` is a `#rank`, an id, or words from its text; several matches come back as buttons. A plain DM to the app adds an item to `daily` with the same markers and gets a check mark reaction once it is written. Items made from Slack are yours (no rank prefix), like the ones you type in Neovim.
+An `<item>` is a `#rank`, an id, or words from its text; several matches come back as buttons. A DM that is not a command adds nothing; the reply points you at `new <text>`. Items made from Slack are yours (no rank prefix), like the ones you type in Neovim.
 
 ## Obsidian Vault Export
 

@@ -6,31 +6,31 @@ import { logError } from "./http.js";
 import { getSetting, setSetting } from "./settings.js";
 
 export const PRIVATE = "This app is private.";
-export const usage = cur => [
-    `*doit* · current list: *${cur}*`,
+export const usage = (p = "/doit ") => [
+    "*doit commands*",
     "",
     "*See*",
-    "`/doit`  pending items on the current list",
-    "`/doit ls <list>`  pending items on another list",
-    "`/doit lists`  every list",
-    "`/doit find <words>`  search every list",
+    `\`${p}ls\`  pending items on the current list`,
+    `\`${p}ls <list>\`  pending items on another list`,
+    `\`${p}lists\`  every list`,
+    `\`${p}find <words>\`  search every list`,
     "",
     "*Switch*",
-    "`/doit use <list>`  make it the current list; the Home tab follows",
+    `\`${p}lists <list>\` or \`${p}use <list>\`  make it the current list; every reply starts with it, and the Home tab follows`,
     "",
     "*Add*",
-    "`/doit add <text>`  add to the current list",
-    "`/doit add renew cert !! @auth due:2026-12-01`  `!` important, `!!` urgent, `!!!` critical; `@list` picks another list",
+    `\`${p}new <text>\`  add to the current list (\`add\` works too)`,
+    `\`${p}new renew cert !! @auth due:2026-12-01\`  \`!\` important, \`!!\` urgent, \`!!!\` critical; \`@list\` picks another list`,
     "",
     "*Change*  (pick an item by words from its text, `#rank`, or id)",
-    "`/doit done <item>`  also `start`, `reopen`, and `rm` (rm asks first)",
-    "`/doit mv <item> @list`  move it to another list",
-    "`/doit note #3 <text>`  append a note (item by `#rank` or id)",
+    `\`${p}done <item>\`  also \`start\`, \`reopen\`, and \`rm\` (rm asks first)`,
+    `\`${p}mv <item> @list\`  move it to another list`,
+    `\`${p}note #3 <text>\`  append a note (item by \`#rank\` or id)`,
     "",
     "*Lists*",
-    "`/doit list add <name>`,  `/doit list rename <old> <new>`,  `/doit list rm <name>`",
+    `\`${p}list add <name>\`,  \`${p}list rename <old> <new>\`,  \`${p}list rm <name>\``,
     "",
-    "A DM to the app adds its text to *daily* as a new item.",
+    p ? "DM the app the same commands without `/doit`." : "`/doit` takes the same commands in any channel.",
 ].join("\n");
 
 export const env = () => ({
@@ -149,9 +149,9 @@ const currentList = pool => withClient(pool, async client => {
     return (await listExists(client, name)) ? name : "daily";
 });
 
-// one slash command -> one op (or an ephemeral answer); several matches come back as buttons;
-// `lists` names the lists whose Home view the caller should refresh
-export async function runCommand(pool, text, { opId, tz }) {
+// one command (slash or DM) -> one op (or an answer); several matches come back as buttons; every text
+// answer starts with the current list; `lists` names the lists whose Home view the caller should refresh
+export async function runCommand(pool, text, { opId, tz, prefix = "/doit " }) {
     const [verb = "", ...rest] = (text || "").trim().split(/\s+/).filter(Boolean);
     const tail = rest.join(" ");
     const cur = await currentList(pool);
@@ -176,29 +176,29 @@ export async function runCommand(pool, text, { opId, tz }) {
             return opButton(`${h.list}: ${title(h.todo)}`, t, a);
         }));
     };
-    switch (verb) {
+    const switchTo = async name => {
+        const found = await withClient(pool, async client => (await listExists(client, name)) && (await setSetting(client, "home_list", name), true));
+        if (!found) return { text: notFound(name) };
+        return { ...(await run("list_todos", { list: name, filter: "pending" }, { code: true, limit: 16 })), current: name, lists: [name] };
+    };
+    const exec = async () => { switch (verb) {
         case "":
             return run("list_todos", { list: cur, filter: "pending" }, { code: true, limit: 16 });
-        case "use": {
-            const name = rest[0];
-            if (!name) return { text: `Current list: *${cur}*` };
-            const found = await withClient(pool, async client => (await listExists(client, name)) && (await setSetting(client, "home_list", name), true));
-            if (!found) return { text: notFound(name) };
-            return { text: `Current list: *${name}*`, lists: [name] };
-        }
+        case "use":
+            return rest[0] ? switchTo(rest[0]) : { text: "current list" };
         case "ls":
-            if (rest[0] !== "lists" || (await withClient(pool, client => listExists(client, "lists")))) {
-                return run("list_todos", { list: rest[0] || cur, filter: "pending" }, { code: true });
-            }
-        // falls through: `ls lists` means `lists` unless a list is named that
+            // `ls lists` means `lists` unless a list is named that
+            if (rest[0] === "lists" && !(await withClient(pool, client => listExists(client, "lists")))) return run("list_lists", {}, { code: true });
+            return run("list_todos", { list: rest[0] || cur, filter: "pending" }, { code: true });
         case "lists":
-            return { text: `Current list: *${cur}*\n${(await run("list_lists", {}, { code: true })).text}` };
+            return rest[0] ? switchTo(rest[0]) : run("list_lists", {}, { code: true });
         case "find":
-            if (!tail) return { text: usage(cur) };
+            if (!tail) return { text: usage(prefix) };
             return run("search_todos", { query: tail }, { code: true });
+        case "new":
         case "add": {
             const m = parseMarkers(tail);
-            if (!m.text) return { text: usage(cur) };
+            if (!m.text) return { text: usage(prefix) };
             return run("add_todo", { list: m.list || cur, text: m.text, priority: m.priority, due: m.due });
         }
         case "done":
@@ -206,18 +206,18 @@ export async function runCommand(pool, text, { opId, tz }) {
         case "reopen":
         case "rm": {
             const m = parseMarkers(tail);
-            if (!m.text) return { text: usage(cur) };
+            if (!m.text) return { text: usage(prefix) };
             const tool = REF_TOOLS[verb];
             return withRef(m.text, m.list, h => [tool, { list: h.list, id: h.todo.id }], verb === "rm" ? { confirm: "Delete" } : {});
         }
         case "mv": {
             const m = parseMarkers(tail);
-            if (!m.text || !m.list) return { text: usage(cur) };
+            if (!m.text || !m.list) return { text: usage(prefix) };
             return withRef(m.text, undefined, h => ["move_todo", { from_list: h.list, id: h.todo.id, to_list: m.list }]);
         }
         case "note": {
             const [ref, ...note] = rest;
-            if (!ref || !note.length) return { text: usage(cur) };
+            if (!ref || !note.length) return { text: usage(prefix) };
             return withRef(ref, undefined, h => ["add_note", { list: h.list, id: h.todo.id, note: note.join(" ") }]);
         }
         case "list": {
@@ -225,13 +225,16 @@ export async function runCommand(pool, text, { opId, tz }) {
             if (sub === "add" && a) return run("create_list", { name: a, source: "user" });
             if (sub === "rename" && a && b) return run("rename_list", { old_name: a, new_name: b });
             if (sub === "rm" && a) return buttons(`Delete list *${a}* and everything in it?`, [opButton("Delete", "delete_list", { name: a }, "danger")]);
-            return { text: usage(cur) };
+            return { text: usage(prefix) };
         }
         case "help":
-            return { text: usage(cur) };
+            return { text: usage(prefix) };
         default:
-            return { text: `Unknown command \`${verb}\`.\n\n${usage(cur)}` };
-    }
+            return { text: `Unknown command \`${verb}\`. \`${prefix}new <text>\` adds an item; \`${prefix}help\` shows every command.` };
+    } };
+    const { current = cur, ...out } = await exec();
+    if (out.blocks) return out;
+    return { ...out, text: `*${current}* ›${out.text.startsWith("```") ? "\n" : " "}${out.text}` };
 }
 
 export const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

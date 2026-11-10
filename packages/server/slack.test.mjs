@@ -112,7 +112,7 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
 {
     assert.match((await command("list add daily")).json.text, /daily/);
     assert.match((await command("list add auth")).json.text, /auth/);
-    assert.match((await command("add nowhere @missing")).json.text, /^No list named "missing"\./, "lists are made on purpose, not by a typo");
+    assert.match((await command("add nowhere @missing")).json.text, /No list named "missing"\./, "lists are made on purpose, not by a typo");
     const r = await command("add renew cert !! @auth due:2026-12-01");
     assert.equal(r.status, 200);
     assert.equal(r.json.response_type, "ephemeral");
@@ -132,7 +132,7 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     await command("add first thing");
     await command("add second thing");
     const ls = await command("ls");
-    assert.match(ls.json.text, /^```\n[\s\S]*first thing[\s\S]*```$/);
+    assert.match(ls.json.text, /^\*daily\* ›\n```\n[\s\S]*first thing[\s\S]*```$/, "replies start with the current list");
     assert.match((await command("lists")).json.text, /auth/);
     assert.match((await command("find renew")).json.text, /renew cert/);
     const pick = await command("done thing");
@@ -145,34 +145,34 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     assert.match(done.json.text, /Completed/);
     assert.equal((await one("select doc from lists where name = 'daily'")).doc.todos.find(t => t.text === "first thing").done, true);
     assert.match((await command("done nothing-like-this")).json.text, /No open item/);
-    assert.match((await command("frobnicate")).json.text, /^Unknown command `frobnicate`\.\n\n\*doit\*/);
+    assert.match((await command("frobnicate")).json.text, /^\*daily\* › Unknown command `frobnicate`\. `\/doit new <text>` adds an item; `\/doit help` shows every command\.$/);
     const help = (await command("help")).json.text;
-    assert.match(help, /current list: \*daily\*/);
+    assert.match(help, /^\*daily\* › \*doit commands\*/);
     assert.match(help, /`\/doit use <list>`/);
     assert.doesNotMatch(help, /\[|\|/, "no bracket or pipe grammar");
     assert.match((await command("ls lists")).json.text, /auth/, "ls lists means lists");
     const missing = (await command("ls nosuch")).json.text;
-    assert.match(missing, /^No list named "nosuch"\./);
+    assert.match(missing, /^\*daily\* › No list named "nosuch"\./);
     assert.doesNotMatch(missing, / at /, "no storage path");
 }
 
 // use: /doit, ls and add follow the current list, which the Home picker shares
 {
-    assert.match((await command("use")).json.text, /Current list: \*daily\*/);
-    assert.match((await command("use nosuch")).json.text, /^No list named "nosuch"\./);
+    assert.match((await command("use")).json.text, /^\*daily\* › current list$/);
+    assert.match((await command("use nosuch")).json.text, /No list named "nosuch"\./);
     calls.length = 0;
-    assert.match((await command("use auth")).json.text, /Current list: \*auth\*/);
+    assert.match((await command("use auth")).json.text, /^\*auth\* ›\n```[\s\S]*renew cert/, "switching shows the list");
     assert.equal((await one("select value from settings where key = 'home_list'")).value, "auth");
     assert.ok(await waitFor(() => calls.some(c => c.path === "/views.publish")), "home follows the switch");
     assert.match((await command("")).json.text, /renew cert/);
     assert.match((await command("ls")).json.text, /renew cert/);
-    assert.match((await command("lists")).json.text, /^Current list: \*auth\*\n```/);
+    assert.match((await command("lists")).json.text, /^\*auth\* ›\n```[\s\S]*daily/);
     await command("list add usetest");
-    await command("use usetest");
-    await command("add from use");
+    assert.match((await command("lists usetest")).json.text, /^\*usetest\* ›/, "lists <name> switches");
+    assert.match((await command("new from use")).json.text, /^\*usetest\* › Added/, "new is add");
     assert.ok((await one("select doc from lists where name = 'usetest'")).doc.todos.some(t => t.text === "from use"));
     await pool.query("update settings set value = '\"gone\"' where key = 'home_list'");
-    assert.match((await command("use")).json.text, /Current list: \*daily\*/, "a deleted current list falls back to daily");
+    assert.match((await command("use")).json.text, /^\*daily\* › current list$/, "a deleted current list falls back to daily");
     await command("use daily");
 }
 
@@ -210,7 +210,7 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     assert.equal(JSON.parse(ask.json.blocks[1].elements[0].value).tool, "delete_list");
 }
 
-// events: URL verification, bot and subtype ignored, DM captured with a reaction, retry applies once
+// events: URL verification, bot and subtype ignored; a DM runs as a command and answers in the DM, once per retry
 {
     const challenge = JSON.stringify({ type: "url_verification", challenge: "abc" });
     assert.equal((await post("/api/slack/events", challenge, sign(challenge))).json.challenge, "abc");
@@ -223,19 +223,37 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     await post("/api/slack/events", stranger, sign(stranger));
     await new Promise(r => setTimeout(r, 200));
     assert.equal((await one("select count(*) as n from applied_ops")).n, before, "none of those ran an op");
-    const dm = JSON.stringify({ type: "event_callback", event_id: "Ev1", event: { type: "message", channel_type: "im", user: "UOWNER", text: "call the bank !", channel: "D1", ts: "1700000000.000200" } });
-    const r = await post("/api/slack/events", dm, sign(dm));
-    assert.equal(r.status, 200);
-    assert.ok(await waitFor(() => calls.some(c => c.path === "/reactions.add")));
-    assert.deepEqual(calls.find(c => c.path === "/reactions.add").body, { channel: "D1", timestamp: "1700000000.000200", name: "white_check_mark" });
-    const retry = await post("/api/slack/events", dm, { ...Object.fromEntries(sign(dm)), "x-slack-retry-num": "1" });
+    const dm = (id, text) => JSON.stringify({ type: "event_callback", event_id: id, event: { type: "message", channel_type: "im", user: "UOWNER", text, channel: "D1", ts: `1700000000.${id}` } });
+    const replies = () => calls.filter(c => c.path === "/chat.postMessage" && c.body.channel === "D1").map(c => c.body.text);
+    calls.length = 0;
+    const add = dm("200", "new call the bank !");
+    assert.equal((await post("/api/slack/events", add, sign(add))).status, 200);
+    assert.ok(await waitFor(() => replies().length === 1));
+    assert.match(replies()[0], /^\*daily\* › Added/, "a DM runs like /doit and answers in the DM");
+    const retry = await post("/api/slack/events", add, { ...Object.fromEntries(sign(add)), "x-slack-retry-num": "1" });
     assert.equal(retry.status, 200);
     await new Promise(r => setTimeout(r, 300));
+    assert.equal(replies().length, 1, "a retry posts no second reply");
     const daily = (await one("select doc from lists where name = 'daily'")).doc;
     const banks = daily.todos.filter(t => t.text === "call the bank");
     assert.equal(banks.length, 1, "retried event applied once");
     assert.equal(banks[0].priorities, "important");
     assert.equal(banks[0].source, "slack");
+
+    calls.length = 0;
+    const chat = dm("300", "call the dentist");
+    await post("/api/slack/events", chat, sign(chat));
+    assert.ok(await waitFor(() => replies().length === 1));
+    assert.match(replies()[0], /Unknown command `call`\. `new <text>` adds an item; `help` shows every command\./, "no slash in DM hints");
+    assert.ok(!(await one("select doc from lists where name = 'daily'")).doc.todos.some(t => /dentist/.test(t.text)), "unknown text adds nothing");
+
+    calls.length = 0;
+    const sw = dm("400", "lists auth");
+    await post("/api/slack/events", sw, sign(sw));
+    assert.ok(await waitFor(() => replies().length === 1));
+    assert.match(replies()[0], /^\*auth\* ›\n```/);
+    assert.equal((await one("select value from settings where key = 'home_list'")).value, "auth");
+    await command("use daily");
 }
 
 // Home tab: owner's items before Claude's, in progress first; list switch; overflow and modals
