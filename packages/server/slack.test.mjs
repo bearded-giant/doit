@@ -236,6 +236,7 @@ const sections = view => view.blocks.filter(b => b.type === "section").map(b => 
     assert.ok(texts.findIndex(t => /call the bank/.test(t)) < texts.findIndex(t => /claude task/.test(t)), "mine before claude");
     assert.ok(texts.findIndex(t => /water plants/.test(t)) > texts.findIndex(t => /call the bank/.test(t)) && texts.some(t => /water plants/.test(t)), "priority before none");
     assert.ok(view.blocks.length <= 100);
+    for (const b of view.blocks) if (b.accessory?.type === "overflow") assert.ok(b.accessory.options.length <= 5, "slack caps overflow menus at 5 options");
     assert.equal(view.blocks[0].elements[0].initial_option.value, "daily");
 
     calls.length = 0;

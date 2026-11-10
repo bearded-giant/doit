@@ -2,7 +2,7 @@ import { waitUntil } from "@vercel/functions";
 import { stripFooter } from "@doit/core/tools.js";
 import { getPool } from "../../lib/db.js";
 import { settle } from "../../lib/feed.js";
-import { deleteModal, itemModal, listOptions, modalValue, pickModal, priorityOptions, publishHome, title } from "../../lib/home.js";
+import { deleteModal, itemModal, modalValue, priorityModal, priorityOptions, publishHome, title } from "../../lib/home.js";
 import { logError } from "../../lib/http.js";
 import { loadPgStore } from "../../lib/pgStore.js";
 import { setSetting } from "../../lib/settings.js";
@@ -111,8 +111,7 @@ async function homeItem(pool, payload, opId, { a, list, id }, changed) {
         if (!todo) return publishHome(pool, { list });
         const view = a === "edit" ? itemModal(store, { mode: "edit", list, id, todo })
             : a === "delete" ? deleteModal({ list, id, todo })
-                : a === "move" ? pickModal("move", { list, id, options: listOptions(store).filter(o => o.value !== list) })
-                    : pickModal("priority", { list, id, options: priorityOptions(), initial: todo.priorities || "none" });
+                : priorityModal({ list, id, options: priorityOptions(), initial: todo.priorities || "none" });
         return slackApi("views.open", { trigger_id: payload.trigger_id, view });
     });
 }
@@ -157,10 +156,6 @@ async function submission(payload) {
         }
     } else if (view.callback_id === "priority_modal") {
         r = await applySlackOp(pool, opId, "update_todo", { list: meta.list, id: meta.id, priority: modalValue(view, "priority") || "none" });
-    } else if (view.callback_id === "move_modal") {
-        const to = modalValue(view, "move");
-        r = await applySlackOp(pool, opId, "move_todo", { from_list: meta.list, id: meta.id, to_list: to });
-        changed.push(to);
     } else if (view.callback_id === "delete_modal") {
         r = await applySlackOp(pool, opId, "delete_todo", { list: meta.list, id: meta.id });
     } else {

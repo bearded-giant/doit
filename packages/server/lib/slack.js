@@ -61,7 +61,7 @@ export async function slackApi(method, body) {
         body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!json.ok) logError(`slack:${method}`, new Error(json.error || `http ${res.status}`));
+    if (!json.ok) logError(`slack:${method}`, new Error(json.error || `http ${res.status}`), json.response_metadata?.messages ? { details: json.response_metadata.messages } : {});
     return json;
 }
 

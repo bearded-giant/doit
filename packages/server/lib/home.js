@@ -108,7 +108,6 @@ export function homeBlocks(store, listName, offset = 0) {
                     option("Done", JSON.stringify({ a: "done", ...JSON.parse(item) })),
                     option(t.in_progress ? "Stop" : "Start", JSON.stringify({ a: t.in_progress ? "stop" : "start", ...JSON.parse(item) })),
                     option("Priority…", JSON.stringify({ a: "priority", ...JSON.parse(item) })),
-                    option("Move…", JSON.stringify({ a: "move", ...JSON.parse(item) })),
                     option("Edit…", JSON.stringify({ a: "edit", ...JSON.parse(item) })),
                     option("Delete…", JSON.stringify({ a: "delete", ...JSON.parse(item) })),
                 ],
@@ -161,16 +160,16 @@ export function itemModal(store, { mode = "add", list = "daily", id, todo = {}, 
     };
 }
 
-export function pickModal(kind, { list, id, options, initial }) {
+export function priorityModal({ list, id, options, initial }) {
     return {
         type: "modal",
-        callback_id: `${kind}_modal`,
+        callback_id: "priority_modal",
         private_metadata: JSON.stringify({ list, id }),
-        title: plain(kind === "move" ? "Move item" : "Priority"),
+        title: plain("Priority"),
         submit: plain("Apply"),
         close: plain("Cancel"),
         blocks: [{
-            type: "input", block_id: kind, label: plain(kind === "move" ? "To list" : "Priority"),
+            type: "input", block_id: "priority", label: plain("Priority"),
             element: { type: "static_select", action_id: "v", options, ...(initial && options.some(o => o.value === initial) ? { initial_option: option(initial, initial) } : {}) },
         }],
     };
