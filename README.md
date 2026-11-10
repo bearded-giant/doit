@@ -572,12 +572,12 @@ project list as `[type] N. owed in daily #M: ...` and a twin on `daily` as
 description line pointing at the other, so `daily` collects what you owe across
 every project and each project list still shows it. `complete_todo`,
 `revert_todo`, `delete_todo`, `move_todo`, `rename_list`, and `update_todo`'s
-done / priority / due keep both twins in step. The tmux and nvim UIs do the
-same for done, priority, due, delete (undo brings the twin back too), move, and
-list rename. Since `daily` holds every twin, none of the three will delete or
-rename it. Deleting a project list from any of the three keeps each owed item's
-`daily` twin: the link is dropped, notes the project copy had pick up a
-`notes from "<list>"` block on the twin, and a line records the deletion. The tmux and nvim views of `daily` show only items checked off
+done / priority / due keep both twins in step, and every surface (nvim, tmux,
+Slack, the CLI) goes through those same tools. Twins are deleted together, however
+the delete happens: `delete_todo` on either side, `clear_done`, a duplicate
+`dedupe_todos` drops, or deleting a project list. Undo of a single delete brings
+the twin back too. Since `daily` holds every twin, it cannot be deleted or
+renamed. The tmux and nvim views of `daily` show only items checked off
 today; older done items stay in the file (and in `list_todos`), just hidden.
 Other lists show every done item.
 

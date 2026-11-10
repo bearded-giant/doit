@@ -176,28 +176,41 @@ assert.match(claudeTwin.text, /^\[gate\] \d+\. claude: deploy it$/);
 await callTool("rename_list", { old_name: "claude", new_name: "claude-code" });
 assert.match(byText("daily", "deploy it").text, /^\[gate\] \d+\. claude-code: deploy it$/);
 
-// deleting a list archives the file and keeps each owed item's daily copy, unlinked, carrying the notes that never synced
+// deleting a list archives the file and deletes each owed item's daily twin with it
 await callTool("create_list", { name: "gone" });
 await callTool("add_todo", { list: "gone", text: "rotate creds", type: "gate", owe: true, description: "do: rotate" });
 await callTool("add_todo", { list: "gone", text: "same notes", type: "gate", owe: true, description: "do: same" });
-await callTool("add_note", { list: "gone", id: byText("gone", "rotate creds").id, note: "DONE half of it" });
 const goneOut = await callTool("delete_list", { name: "gone" });
 assert.match(goneOut, /archived to .*deleted\/gone-\d+\.json/);
-assert.match(goneOut, /Twin in "daily" detached/);
+assert.match(goneOut, /Twin in "daily" deleted: .*gone: rotate creds/);
 assert.ok(!fs.existsSync(path.join(listsDir, "gone.json")));
 const archives = fs.readdirSync(path.join(dataDir, "deleted")).filter(f => f.startsWith("gone-"));
 assert.equal(archives.length, 1);
 assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "deleted", archives[0]), "utf-8")).todos.length, 2);
-const keptTwin = byText("daily", "gone: rotate creds");
-assert.equal(keptTwin.twin, undefined);
-assert.match(keptTwin.description, /^from: gone #1/);
-assert.match(keptTwin.description, /notes from "gone":\n[\s\S]*DONE half of it/);
-assert.match(keptTwin.description, /list "gone" deleted \d{4}-\d{2}-\d{2}; twin link dropped/);
-assert.match(keptTwin.description, /last modified: /);
-const sameTwin = byText("daily", "gone: same notes");
-assert.equal(sameTwin.twin, undefined);
-assert.doesNotMatch(sameTwin.description, /notes from/);
-assert.match(sameTwin.description, /list "gone" deleted/);
+assert.equal(byText("daily", "gone: rotate creds"), undefined, "twin deleted with its list");
+assert.equal(byText("daily", "gone: same notes"), undefined);
+
+// clear_done on either side takes the done twin with it
+await callTool("create_list", { name: "cleared" });
+await callTool("add_todo", { list: "cleared", text: "sign form", type: "gate", owe: true });
+await callTool("add_todo", { list: "cleared", text: "file form", type: "gate", owe: true });
+await callTool("complete_todo", { list: "cleared", id: byText("cleared", "sign form").id });
+assert.match(await callTool("clear_done", { list: "cleared" }), /Twin in "daily" deleted: .*cleared: sign form/);
+assert.equal(byText("daily", "cleared: sign form"), undefined);
+assert.ok(byText("daily", "cleared: file form"), "a pending twin stays");
+await callTool("complete_todo", { list: "daily", id: byText("daily", "cleared: file form").id });
+await callTool("clear_done", { list: "daily" });
+assert.equal(byText("cleared", "file form"), undefined, "clearing daily takes the project side too");
+
+// a duplicate dedupe drops takes its twin with it
+await callTool("create_list", { name: "duped" });
+await callTool("add_todo", { list: "duped", text: "call bank", type: "gate", owe: true });
+await callTool("add_todo", { list: "duped", text: "call bank", type: "gate", owe: true });
+assert.equal(read("daily").todos.filter(t => t.text.endsWith("duped: call bank")).length, 2);
+const deduped = await callTool("dedupe_todos", { list: "daily", dry_run: false });
+assert.match(deduped, /Twin in "duped" deleted: .*call bank/);
+assert.equal(read("daily").todos.filter(t => t.text.endsWith("duped: call bank")).length, 1);
+assert.equal(read("duped").todos.length, 1, "the dropped daily copy took its project twin");
 
 // tmux links and the global pointer are the user's view state; an omitted list goes to daily
 fs.writeFileSync(path.join(dataDir, "session.json"), JSON.stringify({ active_list: "proj", sessions: { work: "proj" } }));

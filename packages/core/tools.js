@@ -111,7 +111,6 @@ function save(ctx, name, data) {
 }
 
 // Twins live in two files, so a change made here has to be written there too.
-// tmux (tmux/scripts/lib-twin.sh) and nvim (lua/doit/modules/todos/state/twin.lua) mirror this.
 function syncTwin(ctx, todo, mutate) {
     if (!todo.twin || !todo.twin.list || !todo.twin.id) return "";
     const data = ctx.store.getList(todo.twin.list);
@@ -123,21 +122,13 @@ function syncTwin(ctx, todo, mutate) {
     return `\nTwin in "${todo.twin.list}" ${what}: ${twin.text}`;
 }
 
-// notes never sync between twins, so the deleted side's notes move onto the survivor
-function detachTwin(ctx, todo, deletedList) {
-    if (!todo.twin || todo.twin.list === deletedList) return "";
-    const header = `${todo.twin.list}: ${todo.twin.id}`;
-    return syncTwin(ctx, todo, (_, twin) => {
-        let notes = stripFooter(todo.description).trim();
-        if (notes.startsWith(header)) notes = notes.slice(header.length).trim();
-        const body = stripFooter(twin.description).trimEnd();
-        const parts = [body];
-        if (notes && !body.includes(notes)) parts.push(`notes from "${deletedList}":\n${notes}`);
-        parts.push(`list "${deletedList}" deleted ${ctx.clock.date()}; twin link dropped`);
-        twin.description = stampDescription(ctx, parts.filter(Boolean).join("\n\n"));
-        delete twin.twin;
-        return "detached";
-    });
+// deleting either side of an owed pair deletes the other, whichever tool removed it
+function deleteTwins(ctx, removed) {
+    const gone = new Set(removed.map(t => t.id));
+    return removed.map(t => (t.twin && !gone.has(t.twin.id) ? syncTwin(ctx, t, (twinData, twin) => {
+        removeTodo(twinData, twin.id);
+        return "deleted";
+    }) : "")).join("");
 }
 
 function removeTodo(data, id) {
@@ -1066,10 +1057,7 @@ export const TOOLS = [
 
             const removed = removeTodo(data, result.todo.id);
             save(ctx, name, data);
-            const twinNote = syncTwin(ctx, removed, (twinData, t) => {
-                removeTodo(twinData, t.id);
-                return "deleted";
-            });
+            const twinNote = deleteTwins(ctx, [removed]);
 
             return text(`Deleted from "${name}": ${removed.text}${twinNote}`);
         },
@@ -1113,7 +1101,7 @@ export const TOOLS = [
     },
     {
         name: "clear_done",
-        description: "Delete all completed (done) items from a list. Moves them to _metadata.deleted_todos (last 10 kept for undo).",
+        description: "Delete all completed (done) items from a list. Moves them to _metadata.deleted_todos (last 10 kept for undo). A cleared owed item's twin is deleted too.",
         schema: { list: listArg },
         async handler(ctx, { list }) {
             const { name, data } = openList(ctx, list);
@@ -1127,12 +1115,12 @@ export const TOOLS = [
             data._metadata.deleted_todos = [...done, ...(data._metadata.deleted_todos || [])].slice(0, 10);
             save(ctx, name, data);
 
-            return text(`Cleared ${done.length} completed items from "${name}".`);
+            return text(`Cleared ${done.length} completed items from "${name}".${deleteTwins(ctx, done)}`);
         },
     },
     {
         name: "dedupe_todos",
-        description: "Remove duplicate todos from a list. Duplicates are items whose text matches after normalization — the claude: marker, [type] tag, rank prefix and (dep on #N) suffix are ignored, so an item typed in nvim matches the same item created here. Defaults to a DRY RUN that only reports what it would remove; pass dry_run:false to actually delete. Ranks are not renumbered.",
+        description: "Remove duplicate todos from a list. Duplicates are items whose text matches after normalization — the claude: marker, [type] tag, rank prefix and (dep on #N) suffix are ignored, so an item typed in nvim matches the same item created here. A dropped copy's owed twin is deleted too. Defaults to a DRY RUN that only reports what it would remove; pass dry_run:false to actually delete. Ranks are not renumbered.",
         schema: {
             list: listArg,
             dry_run: z.boolean().optional().describe("Report without deleting (default: true). Pass false to delete."),
@@ -1186,7 +1174,7 @@ export const TOOLS = [
             data._metadata.deleted_todos = [...removed, ...(data._metadata.deleted_todos || [])].slice(0, 10);
             save(ctx, name, data);
 
-            return text(`Removed ${removed.length} duplicate(s) from "${name}":\n\n${report.join("\n\n")}`);
+            return text(`Removed ${removed.length} duplicate(s) from "${name}":\n\n${report.join("\n\n")}${deleteTwins(ctx, removed)}`);
         },
     },
 
@@ -1612,7 +1600,7 @@ export const TOOLS = [
     },
     {
         name: "delete_list",
-        description: "Delete an entire do-it todo list. Cannot delete the active list or \"daily\". The file moves to deleted/ under the data dir; each owed item's twin on another list stays, unlinked, with the deleted copy's notes.",
+        description: "Delete an entire do-it todo list. Cannot delete the active list or \"daily\". The file moves to deleted/ under the data dir; each owed item's twin on another list is deleted with it.",
         schema: {
             name: z.string().describe("List name to delete"),
         },
@@ -1622,7 +1610,7 @@ export const TOOLS = [
             if (name === OWED_LIST) throw new Error(`"${OWED_LIST}" is permanent and cannot be deleted.`);
 
             const count = (data.todos || []).length;
-            const twinNotes = (data.todos || []).map(t => detachTwin(ctx, t, name)).join("");
+            const twinNotes = deleteTwins(ctx, data.todos || []);
             const archived = ctx.store.archiveList(name, ctx.clock.now());
 
             applyViewEffect(ctx.view, "delete_list", { name });

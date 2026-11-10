@@ -480,7 +480,7 @@ Press L in the main todo window to open the list manager where you can:
   links, [sess:win, ...] lists linked windows, dead ones dimmed
 - Rename existing lists
 - Delete lists (except the active one); the file moves to deleted/ in the
-  data dir and owed twins on other lists stay, unlinked
+  data dir and each owed item's twin on daily is deleted with it
 - Preview list contents and statistics
 - Cycle the view between all, mine, and claude lists with s, jump straight
   between mine and claude with m, and flip the list under the cursor between
