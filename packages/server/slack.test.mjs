@@ -148,6 +148,26 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     assert.match((await command("frobnicate")).json.text, /^\/doit/);
 }
 
+// use: /doit, ls and add follow the current list, which the Home picker shares
+{
+    assert.match((await command("use")).json.text, /Current list: \*daily\*/);
+    assert.match((await command("use nosuch")).json.text, /not found/);
+    calls.length = 0;
+    assert.match((await command("use auth")).json.text, /Current list: \*auth\*/);
+    assert.equal((await one("select value from settings where key = 'home_list'")).value, "auth");
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/views.publish")), "home follows the switch");
+    assert.match((await command("")).json.text, /renew cert/);
+    assert.match((await command("ls")).json.text, /renew cert/);
+    assert.match((await command("lists")).json.text, /^Current list: \*auth\*\n```/);
+    await command("list add usetest");
+    await command("use usetest");
+    await command("add from use");
+    assert.ok((await one("select doc from lists where name = 'usetest'")).doc.todos.some(t => t.text === "from use"));
+    await pool.query("update settings set value = '\"gone\"' where key = 'home_list'");
+    assert.match((await command("use")).json.text, /Current list: \*daily\*/, "a deleted current list falls back to daily");
+    await command("use daily");
+}
+
 // rm asks first; the button carries the op and applies once per click
 {
     const ask = await command("rm second");

@@ -3,10 +3,12 @@ import { parseTodoText } from "@doit/core/todo-text.js";
 import { loadPgStore } from "./pgStore.js";
 import { applyOps } from "./runner.js";
 import { logError } from "./http.js";
+import { getSetting, setSetting } from "./settings.js";
 
 export const PRIVATE = "This app is private.";
 export const USAGE = [
-    "/doit                      top pending items on daily",
+    "/doit                      top pending items on the current list",
+    "/doit use [list]           show or switch the current list (the Home tab shares it)",
     "/doit ls [list] | lists | find <text>",
     "/doit add <text> [! | !! | !!!] [@list] [due:YYYY-MM-DD]",
     "/doit done | start | reopen | rm <item>      (<item>: #rank, id, or words)",
@@ -81,7 +83,7 @@ const buttons = (text, elements) => ({
 });
 
 // #rank (in the hinted list, else daily), an id anywhere, or words across every pending item
-export async function resolveRef(pool, ref, listHint) {
+export async function resolveRef(pool, ref, listHint, rankList = "daily") {
     const client = await pool.connect();
     try {
         const store = await loadPgStore(client);
@@ -90,7 +92,7 @@ export async function resolveRef(pool, ref, listHint) {
         if (byId) return { hits: [{ list: byId.name, todo: byId.data.todos.find(t => t.id === ref) }] };
         const rank = /^#?(\d+)$/.exec(ref);
         if (rank) {
-            const list = listHint || "daily";
+            const list = listHint || rankList;
             const todo = (store.getList(list)?.todos || []).find(t => parseTodoText(t.text).rank === Number(rank[1]));
             return { hits: todo ? [{ list, todo }] : [] };
         }
@@ -111,10 +113,29 @@ export async function resolveRef(pool, ref, listHint) {
 
 const REF_TOOLS = { done: "complete_todo", start: "start_todo", reopen: "revert_todo", rm: "delete_todo" };
 
-// one slash command -> one op (or an ephemeral answer); several matches come back as buttons
+const listExists = async (client, name) => (await client.query("select 1 from lists where name = $1 and deleted_at is null", [name])).rowCount > 0;
+
+async function withClient(pool, fn) {
+    const client = await pool.connect();
+    try {
+        return await fn(client);
+    } finally {
+        client.release();
+    }
+}
+
+// the Home tab's list is the current list; one renamed or deleted since falls back to daily
+const currentList = pool => withClient(pool, async client => {
+    const name = await getSetting(client, "home_list", "daily");
+    return (await listExists(client, name)) ? name : "daily";
+});
+
+// one slash command -> one op (or an ephemeral answer); several matches come back as buttons;
+// `lists` names the lists whose Home view the caller should refresh
 export async function runCommand(pool, text, { opId, tz }) {
     const [verb = "", ...rest] = (text || "").trim().split(/\s+/).filter(Boolean);
     const tail = rest.join(" ");
+    const cur = await currentList(pool);
     const run = async (tool, args, { code = false, limit } = {}) => {
         const r = await applySlackOp(pool, opId, tool, args, tz);
         if (r.status === "failed") return { text: r.error };
@@ -126,7 +147,7 @@ export async function runCommand(pool, text, { opId, tz }) {
         return { text: code ? codeBlock(out) : out };
     };
     const withRef = async (ref, listHint, make, { confirm } = {}) => {
-        const { hits } = await resolveRef(pool, ref, listHint);
+        const { hits } = await resolveRef(pool, ref, listHint, cur);
         if (!hits.length) return { text: `No open item matches "${ref}".` };
         const [tool, args] = make(hits[0]);
         if (hits.length === 1 && !confirm) return run(tool, args);
@@ -138,18 +159,25 @@ export async function runCommand(pool, text, { opId, tz }) {
     };
     switch (verb) {
         case "":
-            return run("list_todos", { list: "daily", filter: "pending" }, { code: true, limit: 16 });
+            return run("list_todos", { list: cur, filter: "pending" }, { code: true, limit: 16 });
+        case "use": {
+            const name = rest[0];
+            if (!name) return { text: `Current list: *${cur}*` };
+            const found = await withClient(pool, async client => (await listExists(client, name)) && (await setSetting(client, "home_list", name), true));
+            if (!found) return { text: `List "${name}" not found.` };
+            return { text: `Current list: *${name}*`, lists: [name] };
+        }
         case "ls":
-            return run("list_todos", { list: rest[0] || "daily", filter: "pending" }, { code: true });
+            return run("list_todos", { list: rest[0] || cur, filter: "pending" }, { code: true });
         case "lists":
-            return run("list_lists", {}, { code: true });
+            return { text: `Current list: *${cur}*\n${(await run("list_lists", {}, { code: true })).text}` };
         case "find":
             if (!tail) return { text: USAGE };
             return run("search_todos", { query: tail }, { code: true });
         case "add": {
             const m = parseMarkers(tail);
             if (!m.text) return { text: USAGE };
-            return run("add_todo", { list: m.list || "daily", text: m.text, priority: m.priority, due: m.due });
+            return run("add_todo", { list: m.list || cur, text: m.text, priority: m.priority, due: m.due });
         }
         case "done":
         case "start":

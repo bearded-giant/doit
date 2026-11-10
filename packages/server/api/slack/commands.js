@@ -12,8 +12,8 @@ export async function POST(request) {
     if (form.user_id !== env().owner) return json({ response_type: "ephemeral", text: PRIVATE });
     try {
         const pool = await getPool();
-        const out = await runCommand(pool, form.text || "", { opId: uuidv5(`command:${form.trigger_id}`), tz: env().tz });
-        waitUntil(settle(pool));
+        const { lists = [], ...out } = await runCommand(pool, form.text || "", { opId: uuidv5(`command:${form.trigger_id}`), tz: env().tz });
+        waitUntil(settle(pool, lists));
         return json({ response_type: "ephemeral", ...out });
     } catch (err) {
         logError("slack/commands", err);
