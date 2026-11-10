@@ -50,6 +50,7 @@ let daemon = startDaemon();
 let st = await waitUp();
 assert.equal(st.mode, "local");
 assert.equal(st.data_dir, data);
+assert.equal(st.server, null);
 assert.ok((fs.statSync(p.socket).mode & 0o777) === 0o600, "socket is 0600");
 assert.ok((fs.statSync(state).mode & 0o777) === 0o700, "state dir is 0700");
 
@@ -103,6 +104,9 @@ assert.ok(!fs.existsSync(p.socket) && !fs.existsSync(p.lock), "a clean stop remo
 daemon = startDaemon({ DOIT_SERVER_URL: "http://127.0.0.1:1" });
 st = await waitUp();
 assert.equal(st.mode, "sync");
+assert.equal(st.server, "http://127.0.0.1:1");
+// the settings line is the daemon's, whatever the CLI's own env says
+assert.ok(cli(["daemon", "status"]).stdout.includes(`server: http://127.0.0.1:1; data: ${data}; state: ${state}`));
 r = await call({ tool: "complete_todo", args: { query: "thing" }, source: "user", active_list: "daily", tz: "America/New_York" });
 assert.equal(r.ok, true);
 let ops = fs.readFileSync(p.outbox, "utf-8").trim().split("\n").map(l => JSON.parse(l));

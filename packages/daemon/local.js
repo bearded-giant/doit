@@ -165,13 +165,14 @@ export function readState(p) {
         last_push_at: prev.last_push_at ?? null,
         error: prev.error ?? null,
         data_dir: prev.data_dir ?? null,
+        server: prev.server ?? null,
     };
 }
 
 // written by the daemon only, so its env decides the mode; surfaces read this file for their badge
 export function writeState(p, extra = {}) {
     const sync = Boolean(serverUrl());
-    const state = { ...readState(p), mode: sync ? "sync" : "local", ...extra };
+    const state = { ...readState(p), mode: sync ? "sync" : "local", server: serverUrl() || null, ...extra };
     if (!sync) {
         state.online = null;
         state.error = null;

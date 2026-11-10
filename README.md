@@ -674,7 +674,7 @@ Neovim, tmux, the CLI, and the MCP bridge all write through one process per mach
 
 ```bash
 doit daemon install     # launchd agent on macOS, systemd user unit on Linux; starts at login
-doit daemon status      # running or not, and the sync state
+doit daemon status      # running or not, the sync state, and its settings (server, data dir, state dir)
 doit daemon logs
 ```
 
