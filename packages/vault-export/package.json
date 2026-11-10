@@ -1,6 +1,6 @@
 {
   "name": "@doit/vault-export",
-  "version": "2.0.13",
+  "version": "3.0.0",
   "description": "doit lists mirrored into an Obsidian vault, with note edits sent back through doitd",
   "type": "module",
   "bin": {
