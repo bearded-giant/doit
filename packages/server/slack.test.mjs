@@ -112,7 +112,7 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
 {
     assert.match((await command("list add daily")).json.text, /daily/);
     assert.match((await command("list add auth")).json.text, /auth/);
-    assert.match((await command("add nowhere @missing")).json.text, /not found/, "lists are made on purpose, not by a typo");
+    assert.match((await command("add nowhere @missing")).json.text, /^No list named "missing"\./, "lists are made on purpose, not by a typo");
     const r = await command("add renew cert !! @auth due:2026-12-01");
     assert.equal(r.status, 200);
     assert.equal(r.json.response_type, "ephemeral");
@@ -145,13 +145,21 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
     assert.match(done.json.text, /Completed/);
     assert.equal((await one("select doc from lists where name = 'daily'")).doc.todos.find(t => t.text === "first thing").done, true);
     assert.match((await command("done nothing-like-this")).json.text, /No open item/);
-    assert.match((await command("frobnicate")).json.text, /^\/doit/);
+    assert.match((await command("frobnicate")).json.text, /^Unknown command `frobnicate`\.\n\n\*doit\*/);
+    const help = (await command("help")).json.text;
+    assert.match(help, /current list: \*daily\*/);
+    assert.match(help, /`\/doit use <list>`/);
+    assert.doesNotMatch(help, /\[|\|/, "no bracket or pipe grammar");
+    assert.match((await command("ls lists")).json.text, /auth/, "ls lists means lists");
+    const missing = (await command("ls nosuch")).json.text;
+    assert.match(missing, /^No list named "nosuch"\./);
+    assert.doesNotMatch(missing, / at /, "no storage path");
 }
 
 // use: /doit, ls and add follow the current list, which the Home picker shares
 {
     assert.match((await command("use")).json.text, /Current list: \*daily\*/);
-    assert.match((await command("use nosuch")).json.text, /not found/);
+    assert.match((await command("use nosuch")).json.text, /^No list named "nosuch"\./);
     calls.length = 0;
     assert.match((await command("use auth")).json.text, /Current list: \*auth\*/);
     assert.equal((await one("select value from settings where key = 'home_list'")).value, "auth");

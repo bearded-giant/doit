@@ -6,14 +6,31 @@ import { logError } from "./http.js";
 import { getSetting, setSetting } from "./settings.js";
 
 export const PRIVATE = "This app is private.";
-export const USAGE = [
-    "/doit                      top pending items on the current list",
-    "/doit use [list]           show or switch the current list (the Home tab shares it)",
-    "/doit ls [list] | lists | find <text>",
-    "/doit add <text> [! | !! | !!!] [@list] [due:YYYY-MM-DD]",
-    "/doit done | start | reopen | rm <item>      (<item>: #rank, id, or words)",
-    "/doit mv <item> @list | note <#rank|id> <text>",
-    "/doit list add <name> | list rename <old> <new> | list rm <name>",
+export const usage = cur => [
+    `*doit* · current list: *${cur}*`,
+    "",
+    "*See*",
+    "`/doit`  pending items on the current list",
+    "`/doit ls <list>`  pending items on another list",
+    "`/doit lists`  every list",
+    "`/doit find <words>`  search every list",
+    "",
+    "*Switch*",
+    "`/doit use <list>`  make it the current list; the Home tab follows",
+    "",
+    "*Add*",
+    "`/doit add <text>`  add to the current list",
+    "`/doit add renew cert !! @auth due:2026-12-01`  `!` important, `!!` urgent, `!!!` critical; `@list` picks another list",
+    "",
+    "*Change*  (pick an item by words from its text, `#rank`, or id)",
+    "`/doit done <item>`  also `start`, `reopen`, and `rm` (rm asks first)",
+    "`/doit mv <item> @list`  move it to another list",
+    "`/doit note #3 <text>`  append a note (item by `#rank` or id)",
+    "",
+    "*Lists*",
+    "`/doit list add <name>`,  `/doit list rename <old> <new>`,  `/doit list rm <name>`",
+    "",
+    "A DM to the app adds its text to *daily* as a new item.",
 ].join("\n");
 
 export const env = () => ({
@@ -111,6 +128,8 @@ export async function resolveRef(pool, ref, listHint, rankList = "daily") {
     }
 }
 
+const notFound = name => `No list named "${name}". \`/doit lists\` shows them all.`;
+
 const REF_TOOLS = { done: "complete_todo", start: "start_todo", reopen: "revert_todo", rm: "delete_todo" };
 
 const listExists = async (client, name) => (await client.query("select 1 from lists where name = $1 and deleted_at is null", [name])).rowCount > 0;
@@ -138,7 +157,7 @@ export async function runCommand(pool, text, { opId, tz }) {
     const cur = await currentList(pool);
     const run = async (tool, args, { code = false, limit } = {}) => {
         const r = await applySlackOp(pool, opId, tool, args, tz);
-        if (r.status === "failed") return { text: r.error };
+        if (r.status === "failed") return { text: r.error.replace(/^List "([^"]+)" not found at \S+$/, (_, name) => notFound(name)) };
         let out = r.text || "Done.";
         if (limit) {
             const lines = out.split("\n");
@@ -164,19 +183,22 @@ export async function runCommand(pool, text, { opId, tz }) {
             const name = rest[0];
             if (!name) return { text: `Current list: *${cur}*` };
             const found = await withClient(pool, async client => (await listExists(client, name)) && (await setSetting(client, "home_list", name), true));
-            if (!found) return { text: `List "${name}" not found.` };
+            if (!found) return { text: notFound(name) };
             return { text: `Current list: *${name}*`, lists: [name] };
         }
         case "ls":
-            return run("list_todos", { list: rest[0] || cur, filter: "pending" }, { code: true });
+            if (rest[0] !== "lists" || (await withClient(pool, client => listExists(client, "lists")))) {
+                return run("list_todos", { list: rest[0] || cur, filter: "pending" }, { code: true });
+            }
+        // falls through: `ls lists` means `lists` unless a list is named that
         case "lists":
             return { text: `Current list: *${cur}*\n${(await run("list_lists", {}, { code: true })).text}` };
         case "find":
-            if (!tail) return { text: USAGE };
+            if (!tail) return { text: usage(cur) };
             return run("search_todos", { query: tail }, { code: true });
         case "add": {
             const m = parseMarkers(tail);
-            if (!m.text) return { text: USAGE };
+            if (!m.text) return { text: usage(cur) };
             return run("add_todo", { list: m.list || cur, text: m.text, priority: m.priority, due: m.due });
         }
         case "done":
@@ -184,18 +206,18 @@ export async function runCommand(pool, text, { opId, tz }) {
         case "reopen":
         case "rm": {
             const m = parseMarkers(tail);
-            if (!m.text) return { text: USAGE };
+            if (!m.text) return { text: usage(cur) };
             const tool = REF_TOOLS[verb];
             return withRef(m.text, m.list, h => [tool, { list: h.list, id: h.todo.id }], verb === "rm" ? { confirm: "Delete" } : {});
         }
         case "mv": {
             const m = parseMarkers(tail);
-            if (!m.text || !m.list) return { text: USAGE };
+            if (!m.text || !m.list) return { text: usage(cur) };
             return withRef(m.text, undefined, h => ["move_todo", { from_list: h.list, id: h.todo.id, to_list: m.list }]);
         }
         case "note": {
             const [ref, ...note] = rest;
-            if (!ref || !note.length) return { text: USAGE };
+            if (!ref || !note.length) return { text: usage(cur) };
             return withRef(ref, undefined, h => ["add_note", { list: h.list, id: h.todo.id, note: note.join(" ") }]);
         }
         case "list": {
@@ -203,10 +225,12 @@ export async function runCommand(pool, text, { opId, tz }) {
             if (sub === "add" && a) return run("create_list", { name: a, source: "user" });
             if (sub === "rename" && a && b) return run("rename_list", { old_name: a, new_name: b });
             if (sub === "rm" && a) return buttons(`Delete list *${a}* and everything in it?`, [opButton("Delete", "delete_list", { name: a }, "danger")]);
-            return { text: USAGE };
+            return { text: usage(cur) };
         }
+        case "help":
+            return { text: usage(cur) };
         default:
-            return { text: USAGE };
+            return { text: `Unknown command \`${verb}\`.\n\n${usage(cur)}` };
     }
 }
 

@@ -727,6 +727,7 @@ The server also hosts a single-owner Slack app. Create it from `packages/server/
 | Command | What it does |
 |---------|--------------|
 | `/doit` | Pending items on the current list |
+| `/doit help` | Every command with an example |
 | `/doit use [list]` | Show the current list, or switch to another |
 | `/doit ls [list]`, `/doit lists`, `/doit find <text>` | Read lists and search |
 | `/doit add <text> [!\|!!\|!!!] [@list] [due:YYYY-MM-DD]` | Add an item; `!` is important, `!!` urgent, `!!!` critical |
