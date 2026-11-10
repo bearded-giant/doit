@@ -60,11 +60,11 @@ icalbuddy -nc -b '""' eventsFrom:{start_date} to:{end_date}
 ## CI/CD & Deployment
 
 **Hosting:**
-- GitHub repository: `bearded-giant/do-it.nvim`
+- GitHub repository: `bearded-giant/doit`
 
 **CI Pipeline:**
 - GitHub Actions for tests
-- Badge: `https://github.com/bearded-giant/do-it.nvim/actions/workflows/run-tests.yml`
+- Badge: `https://github.com/bearded-giant/doit/actions/workflows/run-tests.yml`
 
 **Test Environment:**
 - Docker container based on Alpine Linux

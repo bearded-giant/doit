@@ -1,12 +1,12 @@
-# Do-It.nvim
+# doit
 
 [![Tests](https://github.com/bearded-giant/doit/actions/workflows/run-tests.yml/badge.svg)](https://github.com/bearded-giant/doit/actions/workflows/run-tests.yml)
 
-Do-It.nvim is a modular task management framework for Neovim, providing a clean, distraction-free interface to manage your tasks and notes directly within your editor.
+doit is a modular todo and notes system that lives where you already work. The same lists show up in a Neovim plugin, a tmux add-on, a `doit` command for any shell, and an MCP server so Claude Code can read and write them too. One small daemon per machine does every write, and if you want more than one machine, a server you deploy to Vercel keeps them in sync and hosts a private Slack app.
 
-Do-It.nvim began as a way to track tasks and keep simple markdown notes per project. As a Principal Engineer with many disparate things to keep track of, I wanted a simple way to do that without leaving my editor. I've tried many task managers, but they all seemed too complex - I just needed to know what I needed to do, without bells and whistles.
+doit began as a way to track tasks and keep simple markdown notes per project. As a Principal Engineer with many disparate things to keep track of, I wanted a simple way to do that without leaving my editor. I've tried many task managers, but they all seemed too complex - I just needed to know what I needed to do, without bells and whistles.
 
-> This project is a fork of [Dooing](https://github.com/atiladefreitas/dooing) by [atiladefreitas](https://github.com/atiladefreitas), expanded with a modular framework and additional plugins such ash project notes, and calendar..
+> This project is a fork of [Dooing](https://github.com/atiladefreitas/dooing) by [atiladefreitas](https://github.com/atiladefreitas), expanded with a modular framework and additional plugins such as project notes and calendar.
 
 ## Features
 
@@ -22,6 +22,7 @@ Do-It.nvim began as a way to track tasks and keep simple markdown notes per proj
 - **Lualine Integration** - Show active tasks in your statusline
 - **Tmux Add-on** - Optional tmux integration with shared data (see below)
 - **Command Line** - A `doit` command to browse, add, and edit items from any shell (see [Command Line](#command-line))
+- **MCP Server** - Claude Code and other MCP clients work the same lists you do (see [MCP Server](#mcp-server-claude-code-integration))
 - **Window-Linked Lists** - Each tmux window holds its own active list; `daily` stays one popup away
 - **Hosted Sync** - One daemon per machine writes the lists and syncs them through a small server you deploy; offline edits catch up on reconnect (see [Daemon and Hosted Sync](#daemon-and-hosted-sync))
 - **Slack** - A private Slack app for `/doit` commands and quick captures by DM, served by the same server
@@ -208,7 +209,7 @@ _Note: Requires macOS with icalbuddy installed (`brew install icalbuddy`)_
 
 ## Configuration
 
-Do-It.nvim uses a nested configuration structure that separates core framework settings from module-specific options. This makes it easier to navigate and customize.
+The Neovim plugin uses a nested configuration structure that separates core framework settings from module-specific options. This makes it easier to navigate and customize.
 
 ### Configuration Structure
 
@@ -284,7 +285,7 @@ Also see `:help doit-configuration` in Neovim for interactive documentation.
 
 ## Lualine Integration
 
-Do-It.nvim provides several lualine components to display todo information in your statusline:
+The Neovim plugin provides several lualine components to display todo information in your statusline:
 
 ```lua
 require("lualine").setup({
@@ -315,7 +316,7 @@ Available components:
 
 ## Tmux Integration (Optional Add-on)
 
-> **Note**: The tmux integration is a separate, optional add-on that shares data with the Neovim plugin. You can use doit.nvim without tmux, or use both together for a seamless experience across your terminal workflow.
+> **Note**: The tmux integration is a separate, optional add-on that shares data with the Neovim plugin. You can use the Neovim plugin without tmux, or use both together for a seamless experience across your terminal workflow.
 
 The tmux add-on provides todo management directly from tmux, with status bar integration and an interactive fzf-based manager. Changes sync automatically between Neovim and tmux.
 
@@ -522,7 +523,7 @@ The board marks its pane with the `doit_board` user var, which is how the key fi
 
 ## MCP Server (Claude Code Integration)
 
-Do-it.nvim includes an MCP server that exposes your todo lists to [Claude Code](https://claude.ai/code) and other MCP-compatible tools. This lets you read, create, update, and search todos without leaving your AI coding session.
+doit includes an MCP server that exposes your todo lists to [Claude Code](https://claude.ai/code) and other MCP-compatible tools. This lets you read, create, update, and search todos without leaving your AI coding session.
 
 ### Setup
 
@@ -533,7 +534,7 @@ claude mcp add --scope user doit -- node /path/to/doit/packages/cli/doit-mcp.js
 
 The MCP process is a thin bridge: it reads the list files and hands every write to the daemon (see [Daemon and Hosted Sync](#daemon-and-hosted-sync)), so a model's edits get the same timestamps, twins, and sync as yours. Start the daemon once per machine with `doit daemon install`.
 
-If you configured a custom storage path in your do-it.nvim setup (via `modules.todos.storage.save_path`), export `DOIT_DATA_DIR` to match before you run `doit daemon install` and the `claude mcp add` above; both record it.
+If you configured a custom storage path in your Neovim setup (via `modules.todos.storage.save_path`), export `DOIT_DATA_DIR` to match before you run `doit daemon install` and the `claude mcp add` above; both record it.
 
 ### Available Tools
 
@@ -806,7 +807,7 @@ Tests run per surface: the Node packages under `packages/` use Node's built-in r
 
 ## Acknowledgments
 
-Do-It.nvim started as fork of [Dooing](https://github.com/atiladefreitas/dooing) by [atiladefreitas](https://github.com/atiladefreitas). Special thanks to him for creating the original plugin.
+doit started as a fork of [Dooing](https://github.com/atiladefreitas/dooing) by [atiladefreitas](https://github.com/atiladefreitas). Special thanks to him for creating the original plugin.
 
 The project notes feature was inspired by maple.nvim's project notes functionality.
 

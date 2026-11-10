@@ -5,7 +5,7 @@
 ## Directory Layout
 
 ```
-do-it.nvim/
+doit/
 ├── plugin/                 # Neovim plugin entry point
 │   └── doit.vim           # VimL bootstrap
 ├── lua/doit/              # Main Lua source

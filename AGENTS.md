@@ -1,6 +1,6 @@
 # Working in this repo
 
-Do-It.nvim is one repo with several surfaces over the same lists: the Neovim plugin (`lua/`), the tmux add-on (`tmux/`), and the Node packages under `packages/` (npm workspaces). `packages/core` holds the tool handlers every surface writes through, `packages/daemon` is `doitd` (the one writer per machine, plus sync), `packages/cli` is the `doit` command and the MCP bridge, `packages/server` is the hosted authority (Vercel functions over Postgres, Slack routes), and `packages/vault-export` mirrors lists into an Obsidian vault.
+doit is one repo with several surfaces over the same lists: the Neovim plugin (`lua/`), the tmux add-on (`tmux/`), and the Node packages under `packages/` (npm workspaces). `packages/core` holds the tool handlers every surface writes through, `packages/daemon` is `doitd` (the one writer per machine, plus sync), `packages/cli` is the `doit` command and the MCP bridge, `packages/server` is the hosted authority (Vercel functions over Postgres, Slack routes), and `packages/vault-export` mirrors lists into an Obsidian vault.
 
 ## Build and test
 
