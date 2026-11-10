@@ -238,6 +238,8 @@ function readLists() {
         try {
             lists.push({ name, data: JSON.parse(fs.readFileSync(path.join(LISTS_DIR, file), "utf-8")) });
         } catch (err) {
+            // deleted between the readdir and the read: gone, not broken
+            if (err.code === "ENOENT") continue;
             broken.add(name);
             console.error(`skip ${file}: ${err.message}`);
         }
