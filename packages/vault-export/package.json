@@ -1,7 +1,7 @@
 {
   "name": "@doit/vault-export",
   "version": "2.0.13",
-  "description": "one-way export of doit lists into an Obsidian vault",
+  "description": "doit lists mirrored into an Obsidian vault, with note edits sent back through doitd",
   "type": "module",
   "bin": {
     "doit-vault-export": "vault-export.js"
@@ -10,6 +10,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@doit/cli": "*",
     "@doit/core": "*"
   }
 }

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
-// One-way export of every list into an Obsidian vault folder: a dir per list,
-// a note per item, so lists can be browsed, linked, and read beside other notes.
+// Mirrors every list into an Obsidian vault folder: a dir per list, a note per item, so lists can
+// be browsed, linked, and read beside other notes. Under --watch, edits to an item note's status,
+// priority, due date, title, and body go back to the lists through doitd.
 
 import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { doitCall } from "@doit/cli/client.js";
 import { isSequenced } from "@doit/core/sequence.js";
 import { normalizeTodoText, parseDeps, parseTags, parseTodoText } from "@doit/core/todo-text.js";
 
@@ -17,6 +19,7 @@ const USAGE = "usage: vault-export.js <out_dir> [--watch | --install]";
 
 const PRIORITY_LABELS = { critical: "!!!", urgent: "!!", important: "!" };
 const PRIORITY_RANK = { critical: 0, urgent: 1, important: 2 };
+const DUE = /^(\d{4}-\d{2}-\d{2})?$/;
 const FOOTER = /\n*-{10}\nlast [a-z]+:\s*([^\n]*)\s*$/;
 // only notes carrying this key are pruned, so files the user drops in the folder survive
 const GENERATED = /^---\n(?:.*\n)*?doit_list: /;
@@ -227,7 +230,7 @@ export function syncDir(outDir, files, keep = new Set()) {
     prune(outDir, "", files, keep);
 }
 
-export function exportOnce(outDir) {
+function readLists() {
     const lists = [];
     const broken = new Set();
     for (const file of fs.readdirSync(LISTS_DIR).filter(f => f.endsWith(".json")).sort()) {
@@ -239,24 +242,132 @@ export function exportOnce(outDir) {
             console.error(`skip ${file}: ${err.message}`);
         }
     }
-    syncDir(outDir, buildVault(lists, path.basename(outDir)), broken);
+    return { lists, broken };
 }
 
-// nvim writes lists in place and MCP/tmux rename over them; fs.watch sees both, and the
-// debounce folds a save burst (tmp write, rename, twin write) into one export
+export function exportOnce(outDir) {
+    const { lists, broken } = readLists();
+    const files = buildVault(lists, path.basename(outDir));
+    syncDir(outDir, files, broken);
+    return files;
+}
+
+// the editable part of an item note; null for any file that is not one
+export function parseItemNote(content) {
+    const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(content || "");
+    if (!m) return null;
+    // Obsidian's property editor rewrites values unquoted, the exporter writes them as JSON strings
+    const field = key => {
+        const hit = new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(m[1]);
+        return hit ? hit[1].trim().replace(/^(["'])(.*)\1$/, "$2") : "";
+    };
+    const note = { list: field("doit_list"), id: field("doit_id"), status: field("status"), priority: field("priority"), due: field("due") };
+    if (!note.list || !note.id) return null;
+    const text = /^\s*# (?:\d+[a-z]*\. )?([^\n]*)\n?([\s\S]*)$/.exec(m[2]);
+    return { ...note, title: text ? text[1].trim() : null, body: text ? text[2].trim() : null };
+}
+
+// One note's edits as tool calls. A field counts when it differs from the last export (base) and
+// the lists still hold what that export showed (ours); a field the lists changed meanwhile stays theirs.
+export function noteOps(base, disk, ours, multiline) {
+    if (!base || !disk || !ours) return [];
+    const edited = f => disk[f] !== null && disk[f] !== base[f] && ours[f] === base[f];
+    const ref = { list: disk.list, id: disk.id };
+    const update = {};
+    const ops = [];
+    if (edited("status")) {
+        if (disk.status === "in_progress") ops.push({ tool: "start_todo", args: ref });
+        else if (disk.status === "done") update.done = true;
+        else if (disk.status === "pending") Object.assign(update, base.status === "done" ? { done: false } : { in_progress: false });
+    }
+    if (edited("priority") && (!disk.priority || disk.priority === "none" || disk.priority in PRIORITY_RANK)) {
+        update.priority = disk.priority || "none";
+    }
+    if (edited("due") && DUE.test(disk.due)) update.due = disk.due;
+    // a multi-line item text shares the note body with the notes, so an edit there cannot be told apart
+    if (!multiline) {
+        if (edited("title") && disk.title) update.text = disk.title;
+        if (edited("body")) update.description = disk.body;
+    }
+    if (Object.keys(update).length) ops.push({ tool: "update_todo", args: { ...ref, ...update } });
+    return ops;
+}
+
+// Sends the edits in `rels` (paths under outDir) through doitd, the single writer of the lists.
+// `base` is the last export's files; a note still holding its exported content is the exporter's own write.
+export async function importEdits(outDir, base, rels) {
+    const { lists } = readLists();
+    const index = files => {
+        const byItem = new Map();
+        for (const content of files.values()) {
+            const note = parseItemNote(content);
+            if (note) byItem.set(`${note.list}/${note.id}`, note);
+        }
+        return byItem;
+    };
+    let baseNotes;
+    let ours;
+    let sent = 0;
+    for (const rel of rels) {
+        const content = readOrNull(path.join(outDir, rel));
+        if (content === null || content === base.get(rel)) continue;
+        const disk = parseItemNote(content);
+        if (!disk) continue;
+        baseNotes ??= index(base);
+        ours ??= index(buildVault(lists, path.basename(outDir)));
+        const key = `${disk.list}/${disk.id}`;
+        const todo = lists.find(l => l.name === disk.list)?.data.todos?.find(t => t.id === disk.id);
+        const multiline = Boolean(todo) && parseTodoText(todo.text).body.includes("\n");
+        for (const op of noteOps(baseNotes.get(key), disk, ours.get(key), multiline)) {
+            const res = await doitCall({ ...op, source: "user", active_list: disk.list });
+            if (res.ok) sent++;
+            else console.error(`vault edit ${rel}: ${op.tool}: ${res.error}`);
+        }
+    }
+    return sent;
+}
+
+// A list change or a vault edit schedules one debounced pass: vault edits go to doitd first, then the
+// export rewrites whatever differs, so an edit is never overwritten before it is read. The export's
+// own writes come back as vault events and match `base`, which ends the loop.
+// shortcut: notes edited while no watcher ran are overwritten by its first export; import them at startup if that bites
 function watch(outDir) {
-    const run = () => {
+    let base = new Map();
+    const edited = new Set();
+    let running = false;
+    let again = false;
+    let timer;
+    const schedule = () => {
+        clearTimeout(timer);
+        timer = setTimeout(pass, 300);
+    };
+    const pass = async () => {
+        if (running) {
+            again = true;
+            return;
+        }
+        running = true;
         try {
-            exportOnce(outDir);
+            const rels = [...edited];
+            edited.clear();
+            if (rels.length) await importEdits(outDir, base, rels);
+            base = exportOnce(outDir);
         } catch (err) {
             console.error(err.stack);
         }
+        running = false;
+        if (again) {
+            again = false;
+            schedule();
+        }
     };
-    run();
-    let timer;
-    fs.watch(LISTS_DIR, () => {
-        clearTimeout(timer);
-        timer = setTimeout(run, 300);
+    fs.mkdirSync(outDir, { recursive: true });
+    pass();
+    fs.watch(LISTS_DIR, schedule);
+    fs.watch(outDir, { recursive: true }, (_, file) => {
+        if (!file || !file.endsWith(".md")) return;
+        edited.add(file.split(path.sep).join("/"));
+        schedule();
     });
 }
 

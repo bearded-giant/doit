@@ -736,11 +736,11 @@ An `<item>` is a `#rank`, an id, or words from its text; several matches come ba
 
 ## Obsidian Vault Export
 
-Want your lists in Obsidian, next to the rest of your notes? `packages/vault-export/vault-export.js` mirrors every list into a vault folder: one folder per list, one note per item, so you can browse items and read their notes without a popup covering your panes. It's one-way. Edit todos through Neovim, tmux, or MCP, and the vault copy follows. Anything you change in an exported note gets overwritten on the next export.
+Want your lists in Obsidian, next to the rest of your notes? `packages/vault-export/vault-export.js` mirrors every list into a vault folder: one folder per list, one note per item, so you can browse items and read their notes without a popup covering your panes. A plain run is one-way: the vault copy follows the lists. Under `--watch` it goes both ways, and an edit you make to an item note in Obsidian lands in the list within a second.
 
 ```bash
 node packages/vault-export/vault-export.js <vault>/doit-todos            # export once
-node packages/vault-export/vault-export.js <vault>/doit-todos --watch    # export, then re-export whenever a list changes
+node packages/vault-export/vault-export.js <vault>/doit-todos --watch    # keep exporting, and send note edits back to the lists
 node packages/vault-export/vault-export.js <vault>/doit-todos --install  # macOS: run --watch as a launchd agent
 ```
 
@@ -757,6 +757,18 @@ Here's what lands in the folder:
 | `<list>/notes/<slug>.md` | One list-level note |
 
 File names come from the item text, so editing an item's text renames its note. The exporter only rewrites notes whose content changed, and it only deletes notes it generated (the ones with a `doit_list` key in frontmatter), so anything else you drop in the folder stays put.
+
+What you can edit in an item note, with `--watch` running:
+
+| In the note | What changes in the list |
+|-------------|--------------------------|
+| `status` in frontmatter (`pending`, `in_progress`, `done`) | The item starts, completes, or reopens, and its owed twin follows |
+| `priority` in frontmatter (`critical`, `urgent`, `important`, or empty) | The item's priority |
+| `due` in frontmatter (`YYYY-MM-DD`, or empty) | The due date |
+| The heading, after the rank number | The item's text. Its type tag and rank stay |
+| Everything under the heading | The item's notes |
+
+Edits go through the daemon like every other write, so they get the same timestamps, twins, and sync. The note is matched to its item by the `doit_list` and `doit_id` keys in frontmatter, so renaming the file doesn't break anything. Every other frontmatter key is the exporter's to write, and so is the note of an item whose text runs over several lines: there the heading and body stay read-only, because the extra text lines and the notes share the body. If the list changed the same field after the note was last exported, the list wins. Notes you edit while no watcher is running get overwritten when it starts, and a new note you drop in a list folder is left alone rather than turned into an item.
 
 If your vault syncs to git, think about ignoring the export folder: item notes often hold commands, hostnames, and the odd credential pasted in while working.
 
