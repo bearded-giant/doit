@@ -5,7 +5,7 @@ import { remapOps } from "@doit/core/ops.js";
 import { fileStore, memStore } from "@doit/core/store.js";
 import { runTool } from "@doit/core/tools.js";
 import { applyViewEffect, noView } from "@doit/core/view.js";
-import { appendLine, hostName, paths, readJson, readLines, writeJsonAtomic, writeLines, writeState } from "./local.js";
+import { appendLine, hostName, paths, readJson, readLines, syncInterval, writeJsonAtomic, writeLines, writeState } from "./local.js";
 
 const BATCH = 50;
 const REQUEST_TIMEOUT_MS = Number(process.env.DOIT_SYNC_TIMEOUT_MS) || 15000;
@@ -209,9 +209,9 @@ export async function clone(cfg) {
     return { lists: pulled.changed.filter(k => !k.startsWith("notes/")).length, cursor: pulled.cursor, changed: pulled.changed };
 }
 
-export const syncConfig = ({ data, state, server, host = hostName(), view = noView } = {}) => ({ data, state, server, host, view });
+export const syncConfig = ({ data, state, server, host = hostName(), view = noView, interval = syncInterval() } = {}) => ({ data, state, server, host, view, interval });
 
-// The daemon's loop: push whatever is queued, then pull; every 10 s online, backing off 2 s..60 s
+// The daemon's loop: push whatever is queued, then pull; every cfg.interval (10 s) online, backing off 2 s..60 s
 // offline, at once after a queued /call, and when the clock jumps (sleep, wake).
 export function createSyncer(cfg, { log = () => {}, onChange = () => {} } = {}) {
     const p = paths(cfg.state);
@@ -220,6 +220,7 @@ export function createSyncer(cfg, { log = () => {}, onChange = () => {} } = {}) 
     let inflight = null;
     let lastTick = Date.now();
     let lastPull = 0;
+    const every = cfg.interval || 10000;
 
     async function run() {
         try {
@@ -227,7 +228,7 @@ export function createSyncer(cfg, { log = () => {}, onChange = () => {} } = {}) 
             const pulled = await pull(cfg);
             lastPull = Date.now();
             backoff = 2000;
-            nextAt = lastPull + 10000;
+            nextAt = lastPull + every;
             const changed = [...pushed.changed, ...pulled.changed];
             if (changed.length) onChange(changed);
             if (pushed.sent || pulled.pulled) log(`sync: pushed ${pushed.sent} (${pushed.failed} failed), pulled ${pulled.pulled}, cursor ${pulled.cursor}`);
@@ -252,7 +253,7 @@ export function createSyncer(cfg, { log = () => {}, onChange = () => {} } = {}) 
         if (now - lastTick > 30000) nextAt = now;
         lastTick = now;
         if (now >= nextAt) {
-            nextAt = now + 10000;
+            nextAt = now + every;
             cycle().catch(() => {});
         }
     }, 1000);

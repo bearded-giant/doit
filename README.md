@@ -629,6 +629,7 @@ Duplicate detection strips that whole wrapper before comparing, so an item you t
 | `DOIT_DATA_DIR` | `~/.local/share/nvim/doit` | Data directory path |
 | `DOIT_STATE_DIR` | `~/.local/state/doit` | The daemon's socket, lock, token, and sync state; never inside the data dir |
 | `DOIT_SERVER_URL` | (unset) | The sync server. Unset, the daemon runs local-only and queues nothing |
+| `DOIT_SYNC_INTERVAL_MS` | `10000` | How often a syncing daemon pulls when nothing is queued. Edits made on the machine still push at once, and `doit sync pull` pulls on demand |
 | `DOIT_HOST` | the hostname | Name this machine's edits carry on the server |
 | `DOIT_ACTIVE_LIST` | (unset) | Override active list name. Wins over window links and per-project derivation. The MCP server reads only this, then `daily` |
 
@@ -714,7 +715,7 @@ The server is `packages/server`: a handful of HTTP functions for Vercel over a P
 
 The same state shows in the nvim statusline (`sync_badge`), the tmux status segment, and `doit daemon status`. A quiet badge means everything is pushed and pulled.
 
-Turning sync off is one step: unset `DOIT_SERVER_URL` and reinstall the daemon. The files stay complete, so the machine keeps working on its own copy.
+`doit daemon install` keeps the server and pull interval the installed daemon already has, so a reinstall never changes them unless you pass new values. Turning sync off is one step: `DOIT_SERVER_URL= doit daemon install` (set, but empty). The files stay complete, so the machine keeps working on its own copy.
 
 ### Slack
 

@@ -106,7 +106,7 @@ st = await waitUp();
 assert.equal(st.mode, "sync");
 assert.equal(st.server, "http://127.0.0.1:1");
 // the settings line is the daemon's, whatever the CLI's own env says
-assert.ok(cli(["daemon", "status"]).stdout.includes(`server: http://127.0.0.1:1; data: ${data}; state: ${state}`));
+assert.ok(cli(["daemon", "status"]).stdout.includes(`server: http://127.0.0.1:1 (pull every 10 s); data: ${data}; state: ${state}`));
 r = await call({ tool: "complete_todo", args: { query: "thing" }, source: "user", active_list: "daily", tz: "America/New_York" });
 assert.equal(r.ok, true);
 let ops = fs.readFileSync(p.outbox, "utf-8").trim().split("\n").map(l => JSON.parse(l));

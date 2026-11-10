@@ -169,7 +169,7 @@ async function daemonCommand(verb = "status") {
                 ? `doitd running (pid ${holder.pid}); socket ${state ? "answers" : "does not answer"}: ${p.socket}`
                 : `doitd not running (${p.lock} is free)`);
             if (state) console.log(formatState(state));
-            if (state) console.log(`server: ${state.server || "none"}; data: ${state.data_dir}; state: ${stateDir()}`);
+            if (state) console.log(`server: ${state.server || "none"}${state.interval_ms ? ` (pull every ${state.interval_ms / 1000} s)` : ""}; data: ${state.data_dir}; state: ${stateDir()}`);
             return console.log(serviceStatus());
         }
         default:

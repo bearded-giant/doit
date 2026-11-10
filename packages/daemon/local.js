@@ -13,6 +13,7 @@ export const dataDir = () => process.env.DOIT_DATA_DIR || path.join(os.homedir()
 // runtime state lives outside the data dir so a file sync of the lists never carries the socket, lock or outbox
 export const stateDir = () => process.env.DOIT_STATE_DIR || path.join(os.homedir(), ".local/state/doit");
 export const serverUrl = () => process.env.DOIT_SERVER_URL || "";
+export const syncInterval = () => Number(process.env.DOIT_SYNC_INTERVAL_MS) || 10000;
 export const hostName = () => process.env.DOIT_HOST || os.hostname();
 
 export function paths(state = stateDir()) {
@@ -166,13 +167,14 @@ export function readState(p) {
         error: prev.error ?? null,
         data_dir: prev.data_dir ?? null,
         server: prev.server ?? null,
+        interval_ms: prev.interval_ms ?? null,
     };
 }
 
 // written by the daemon only, so its env decides the mode; surfaces read this file for their badge
 export function writeState(p, extra = {}) {
     const sync = Boolean(serverUrl());
-    const state = { ...readState(p), mode: sync ? "sync" : "local", server: serverUrl() || null, ...extra };
+    const state = { ...readState(p), mode: sync ? "sync" : "local", server: serverUrl() || null, interval_ms: sync ? syncInterval() : null, ...extra };
     if (!sync) {
         state.online = null;
         state.error = null;

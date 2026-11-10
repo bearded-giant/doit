@@ -20,9 +20,29 @@ const sleepSync = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0
 
 // Only paths go into the plist or unit: the sync token is read from $DOIT_STATE_DIR/token (0600),
 // never from these world-readable files.
-function env() {
+// A reinstall with one of these unset keeps what the installed unit carries, so a syncing daemon
+// never drops to local-only by accident; set it empty to drop it.
+function installed(key) {
+    const mac = process.platform === "darwin";
+    let text;
+    try {
+        text = fs.readFileSync(mac ? plistPath() : unitPath(), "utf-8");
+    } catch {
+        return "";
+    }
+    const m = text.match(mac
+        ? new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`)
+        : new RegExp(`^Environment=${key}=(.*)$`, "m"));
+    if (!m) return "";
+    return mac ? m[1].replace(/&lt;/g, "<").replace(/&amp;/g, "&") : m[1];
+}
+
+export function serviceEnv() {
     const out = { DOIT_DATA_DIR: dataDir(), DOIT_STATE_DIR: stateDir() };
-    if (process.env.DOIT_SERVER_URL) out.DOIT_SERVER_URL = process.env.DOIT_SERVER_URL;
+    for (const key of ["DOIT_SERVER_URL", "DOIT_SYNC_INTERVAL_MS"]) {
+        const value = process.env[key] ?? installed(key);
+        if (value) out[key] = value;
+    }
     return out;
 }
 
@@ -32,7 +52,7 @@ const domain = () => `gui/${process.getuid()}`;
 
 function writePlist() {
     const log = paths(stateDir()).log;
-    const vars = Object.entries(env()).map(([k, v]) => `        <key>${k}</key>\n        <string>${xml(v)}</string>`).join("\n");
+    const vars = Object.entries(serviceEnv()).map(([k, v]) => `        <key>${k}</key>\n        <string>${xml(v)}</string>`).join("\n");
     fs.mkdirSync(path.dirname(plistPath()), { recursive: true });
     fs.writeFileSync(plistPath(), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,7 +83,7 @@ ${vars}
 }
 
 function writeUnit() {
-    const vars = Object.entries(env()).map(([k, v]) => `Environment=${k}=${v}`).join("\n");
+    const vars = Object.entries(serviceEnv()).map(([k, v]) => `Environment=${k}=${v}`).join("\n");
     fs.mkdirSync(path.dirname(unitPath()), { recursive: true });
     fs.writeFileSync(unitPath(), `[Unit]
 Description=doit daemon: single writer of the doit lists
