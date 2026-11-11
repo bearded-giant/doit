@@ -52,7 +52,7 @@ async function applyOne(pool, op, host) {
         for (const ev of store.itemEvents()) {
             await client.query(
                 "insert into events (host, source, tool, list, todo_id, payload) values ($1, $2, $3, $4, $5, $6)",
-                [host, op.source || "user", op.tool, ev.list, ev.todo_id, { kind: ev.kind, text: ev.item.text, done: ev.item.done, in_progress: ev.item.in_progress, priorities: ev.item.priorities, twin: ev.item.twin }],
+                [host, op.source || "user", op.tool, ev.list, ev.todo_id, { kind: ev.kind, change: ev.change, text: ev.item.text, done: ev.item.done, in_progress: ev.item.in_progress, priorities: ev.item.priorities, twin: ev.item.twin }],
             );
         }
         await client.query("commit");

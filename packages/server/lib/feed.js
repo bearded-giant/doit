@@ -8,13 +8,19 @@ const WINDOW_MS = 60000;
 const LOCK = "select pg_advisory_xact_lock(4243)";
 const feedChannel = () => process.env.SLACK_FEED_CHANNEL;
 const pri = p => (p && PRIORITY_LABELS[p] ? ` ${PRIORITY_LABELS[p]}` : "");
-const isClaude = text => /^\s*claude:/.test(text || "");
-const KIND = { added: "+", changed: "~", removed: "−" };
+const verb = l => (l.kind === "changed" ? l.change || "changed" : l.kind);
 
 function batchText(body) {
-    const lines = body.lines.map(l => `${KIND[l.kind] || "~"} ${esc(title({ text: l.text }))}${pri(l.priorities)}`);
-    if (body.claude) lines.push(`${body.claude} claude: item${body.claude === 1 ? "" : "s"}`);
+    const lines = body.lines.map(l => `_${verb(l)}_ ${esc(title({ text: l.text }))}${pri(l.priorities)}`);
     return { text: `*${esc(body.host)}* · ${esc(body.list)}\n${lines.join("\n")}`, blocks: [] };
+}
+
+// one line per item: a later event replaces its line, and an item added in this window stays "added" through edits
+function withLine(lines, line) {
+    const at = lines.findIndex(l => l.id && l.id === line.id);
+    if (at < 0) return [...lines, line].slice(-20);
+    if (lines[at].kind === "added" && (line.change === "edited" || line.change === "reordered")) line = { ...line, kind: "added" };
+    return lines.map((l, i) => (i === at ? line : l));
 }
 
 function owedMessage(body) {
@@ -56,8 +62,8 @@ async function upsertMessage(client, key, body, render, existing) {
 }
 
 // Walks events past the feed cursor once, under its own lock: Claude's changes (source mcp) post or
-// extend one message per host and list per minute, owed twins get their own message with buttons,
-// and any source's change to an item that has a message edits that message.
+// extend one message per host and list per minute, one line per item naming the change, owed twins
+// get their own message with buttons, and any source's change to an item that has a message edits that message.
 export async function runFeed(pool) {
     if (!feedChannel() || !env().token) return { posted: 0 };
     const client = await pool.connect();
@@ -92,9 +98,8 @@ export async function runFeed(pool) {
             }
             const batchKey = `batch:${ev.host}:${ev.list}`;
             const batch = (await client.query("select channel, ts, body, updated_at from feed_messages where key = $1 and updated_at > now() - ($2 || ' milliseconds')::interval", [batchKey, String(WINDOW_MS)])).rows[0];
-            const body = batch ? batch.body : { host: ev.host, list: ev.list, lines: [], claude: 0 };
-            if (isClaude(p.text)) body.claude = (body.claude || 0) + 1;
-            else body.lines = [...(body.lines || []), { kind: p.kind, text: p.text, priorities: p.priorities ?? null }].slice(-20);
+            const body = batch ? batch.body : { host: ev.host, list: ev.list, lines: [] };
+            body.lines = withLine(body.lines || [], { id: ev.todo_id, kind: p.kind, change: p.change ?? null, text: p.text, priorities: p.priorities ?? null });
             await upsertMessage(client, batchKey, body, batchText, batch || null);
             if (!batch) posted++;
         }

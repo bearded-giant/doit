@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import http from "node:http";
 import pg from "pg";
+import { changeOf } from "./lib/pgStore.js";
 import { parseMarkers, uuidv5, verifySlack } from "./lib/slack.js";
 
 const SECRET = "shhh";
@@ -22,6 +23,18 @@ const sign = (body, ts = Math.floor(Date.now() / 1000)) => new Headers({
     assert.equal(verifySlack(sign(body, Math.floor(Date.now() / 1000) - 600), body, SECRET), false, "older than five minutes");
     assert.equal(verifySlack(new Headers(), body, SECRET), false);
     assert.equal(verifySlack(sign(body), body, undefined), false, "no secret configured");
+}
+
+// feed verbs: done and in_progress flips win, order-only changes are a reorder, anything else an edit
+{
+    const t = { id: "a", text: "x", done: false, in_progress: false, order_index: 1 };
+    assert.equal(changeOf(t, { ...t, done: true, in_progress: false }), "done");
+    assert.equal(changeOf({ ...t, done: true }, t), "reopened");
+    assert.equal(changeOf(t, { ...t, in_progress: true }), "started");
+    assert.equal(changeOf({ ...t, in_progress: true }, t), "stopped");
+    assert.equal(changeOf(t, { ...t, order_index: 2, sequence: 1 }), "reordered");
+    assert.equal(changeOf(t, { ...t, description: "why" }), "edited");
+    assert.equal(changeOf(t, { ...t, text: "y", order_index: 2 }), "edited");
 }
 
 // markers: priority bangs, @list, due:, anywhere in the text
@@ -352,7 +365,7 @@ const sections = view => view.blocks.filter(b => b.type === "section").map(b => 
     assert.match(added.description, /by friday/);
 }
 
-// Feed: Claude's changes post per host and list, extend within a minute, claude: items collapse;
+// Feed: Claude's changes post per host and list, extend within a minute, one line per item naming the change;
 // an owed twin gets its own message with buttons and is edited when a user completes it
 {
     const c = await pool.connect();
@@ -360,18 +373,33 @@ const sections = view => view.blocks.filter(b => b.type === "section").map(b => 
     c.release();
     const ops = ops => fetch(`${base}/api/ops`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ ops }) }).then(r => r.json());
     const op = (tool, args, source = "mcp") => ({ op_id: uuidv5(`feed:${++n}`), ts: Date.now(), tz: "UTC", source, tool, args });
+    const lastUpdate = () => calls.filter(c => c.path === "/chat.update").at(-1).body.text;
     await quiet();
     calls.length = 0;
     await ops([op("add_todo", { list: "auth", text: "from claude", type: "chore" })]);
     assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.postMessage")));
     const first = calls.find(c => c.path === "/chat.postMessage").body;
     assert.equal(first.channel, "CFEED");
-    assert.match(first.text, /^\*devbox\* · auth\n\+ \[chore\] \d+\. from claude$/);
+    assert.match(first.text, /^\*devbox\* · auth\n_added_ \[chore\] \d+\. from claude$/);
     calls.length = 0;
-    await ops([op("add_todo", { list: "auth", text: "claude: follow up", type: "chore" })]);
+    const follow = await ops([op("add_todo", { list: "auth", text: "claude: follow up", type: "chore" })]);
     assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.update")));
     assert.equal(calls.filter(c => c.path === "/chat.postMessage").length, 0, "same host and list within a minute edits the message");
-    assert.match(calls.find(c => c.path === "/chat.update").body.text, /from claude\n1 claude: item$/);
+    assert.match(lastUpdate(), /_added_ \[chore\] \d+\. from claude\n_added_ claude: \[chore\] \d+\. follow up$/, "claude: items get their own line");
+    const followId = (await one("select todo_id from events where list = 'auth' order by id desc limit 1")).todo_id;
+    assert.equal(follow.results[0].status, "applied");
+
+    calls.length = 0;
+    await ops([op("update_todo", { list: "auth", id: followId, description: "more detail" })]);
+    assert.ok(await waitFor(() => calls.some(c => c.path === "/chat.update")));
+    assert.match(lastUpdate(), /\n_added_ claude: \[chore\] \d+\. follow up$/, "an edit to an item added this window keeps it added");
+    calls.length = 0;
+    await ops([op("start_todo", { list: "auth", id: followId })]);
+    await ops([op("complete_todo", { list: "auth", id: followId })]);
+    assert.ok(await waitFor(() => calls.filter(c => c.path === "/chat.update").length >= 2));
+    const last = lastUpdate();
+    assert.match(last, /\n_done_ claude: \[chore\] \d+\. follow up$/, "the latest change replaces the item's line");
+    assert.equal(last.split("\n").length, 3, "header plus one line per item");
 
     calls.length = 0;
     const owe = await ops([op("add_todo", { list: "auth", text: "rotate vault creds", type: "gate", owe: true })]);

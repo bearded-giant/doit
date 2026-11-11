@@ -80,7 +80,10 @@ export async function loadPgStore(client) {
                 const now = itemsOf(base.docs.get(key));
                 for (const [id, json] of now) {
                     if (!was.has(id)) out.push({ list: key, todo_id: id, kind: "added", item: JSON.parse(json) });
-                    else if (was.get(id) !== json) out.push({ list: key, todo_id: id, kind: "changed", item: JSON.parse(json) });
+                    else if (was.get(id) !== json) {
+                        const item = JSON.parse(json);
+                        out.push({ list: key, todo_id: id, kind: "changed", change: changeOf(JSON.parse(was.get(id)), item), item });
+                    }
                 }
                 for (const [id, json] of was) if (!now.has(id)) out.push({ list: key, todo_id: id, kind: "removed", item: JSON.parse(json) });
             }
@@ -88,6 +91,16 @@ export async function loadPgStore(client) {
         },
     };
     return store;
+}
+
+const ORDER_KEYS = new Set(["order_index", "sequence", "updated_at"]);
+
+export function changeOf(was, now) {
+    if (Boolean(was.done) !== Boolean(now.done)) return now.done ? "done" : "reopened";
+    if (Boolean(was.in_progress) !== Boolean(now.in_progress)) return now.in_progress ? "started" : "stopped";
+    const keys = new Set([...Object.keys(was), ...Object.keys(now)]);
+    const edited = [...keys].some(k => !ORDER_KEYS.has(k) && JSON.stringify(was[k]) !== JSON.stringify(now[k]));
+    return edited ? "edited" : "reordered";
 }
 
 function itemsOf(doc) {
